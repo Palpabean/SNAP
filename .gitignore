@@ -1,0 +1,25 @@
+# Third-party images and anything built from them are never committed (Design 0001, section 11).
+*.iso
+*.img
+*.img.*
+*.qcow2
+*.raw
+*.vmdk
+*.xz
+*.zst
+build/
+dist/
+cache/
+.cache/
+
+# Real configs can hold secrets. Only the sanitized example is committed.
+snap.yaml
+answer.toml
+!examples/*.yaml
+
+# Python
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
