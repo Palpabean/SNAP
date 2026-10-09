@@ -1,9 +1,9 @@
-# SNAP (Swift Network Automation Program)
+# snaplab: SNAP (Swift Network Automation Program)
 
 # Design 0001: SNAP Architecture and Process
 
 - **Status:** Draft, proof of concept
-- **Date:** 2026-10-09
+- **Date:** 2026-10-09 (revised the same day: open questions settled, see section 13)
 - **Scope:** USB delivery only. Other delivery methods are future work.
 
 ---
@@ -21,7 +21,7 @@ The work is divided into four named stages:
 | **3** | **POP** | Build the router, firewall, virtual networks, and test VMs |
 | **4** | **BANG** | Final checks, secret cleanup, and "your lab is ready" |
 
-Remote access with Tailscale is **not** a stage. It is an optional operation the user runs after BANG (see section 8).
+Remote access with Tailscale is **not** a stage. It is an optional operation, **ECHO**, that the user runs after BANG (see section 8).
 
 ---
 
@@ -85,14 +85,16 @@ USER'S COMPUTER                                    TARGET COMPUTER
 ### 5.1 SNAP Builder (runs on the user's own computer)
 - Downloads the Proxmox, Ubuntu, and OPNsense images from their official sources.
 - Verifies each against a pinned SHA-256 in `checksums.lock`.
-- Prepares the Proxmox auto-install media and the bundle (engine, stages, offline packages).
+- Prepares the Proxmox auto-install media with Proxmox's own `proxmox-auto-install-assistant prepare-iso --fetch-from partition --on-first-boot snap-firstboot.sh`. The assistant version is pinned to match the ISO version, because mismatches are a known source of answer-file errors.
+- Prepares the bundle (engine, stages, offline packages, the OpenTofu binary and the `bpg/proxmox` provider mirrored for offline use).
 - Writes the USB. Initially requires Linux (or WSL/container) because it assembles a live image.
 - The project never hosts or redistributes the Proxmox, Ubuntu, or OPNsense images.
 
 ### 5.2 The USB
 - A bootloader menu with: Boot through USB: guided setup (default), Proxmox auto-install, advanced command line, memory test, and boot from internal disk.
-- A data partition for `snap.yaml`, the installer answer file, and the payload.
-- Open question: whether one stick can hold both the SNAP environment and the unmodified Proxmox installer reliably across firmware types (see section 11).
+- A small FAT partition labeled `PROXMOX-AIS`, where the wizard writes the rendered `answer.toml`. The Proxmox installer looks for this label when the ISO is prepared with `--fetch-from partition`; the label is fixed by the installer, not by us.
+- A data partition labeled `SNAPDATA` for `snap.yaml`, the payload, and `checksums.lock`.
+- The prepared Proxmox ISO, booted from our own GRUB menu. How it is booted is the M1 spike (see decision D1 in section 13).
 
 ### 5.3 The live environment and TUI
 - A small Debian-based environment that boots straight into a terminal wizard written in Python with the Textual library. It works over a VM console, serial console, or remote console, needs no graphics stack, and can be driven by scripted keystrokes in tests.
@@ -130,8 +132,8 @@ Passwords are stored only as hashes. Real configs containing any secret are neve
 1. Verify the bundle checksums and hardware (UEFI/BIOS, memory, CPU virtualization, disks, network ports and link).
 2. Validate `snap.yaml` against the schema.
 3. Show the typed disk confirmation.
-4. Render the Proxmox answer file from `snap.yaml`.
-5. Place it where the installer will find it, set the next boot to the Proxmox auto-install, and reboot.
+4. Render the Proxmox answer file (`answer.toml`) from `snap.yaml`. The target disk is selected by serial with a `disk-setup` filter, and the root password is written only as a hash. Validate it with `proxmox-auto-install-assistant validate-answer`.
+5. Write it to the `PROXMOX-AIS` partition, set the next boot to the Proxmox auto-install, and reboot.
 6. The installer runs unattended and restarts.
 7. Handoff (section 7.5).
 
@@ -148,10 +150,11 @@ Passwords are stored only as hashes. Real configs containing any secret are neve
 
 ### 7.3 POP (stage 3, on the host)
 1. Render the network model from `snap.yaml`: subnets, VLANs, DHCP, DNS, firewall rules.
-2. Clone the OPNsense VM, attach interfaces, inject a bootstrap configuration, and start it.
-3. Wait for OPNsense, then apply interfaces, DHCP, and firewall rules through its API.
-4. Create the Ubuntu VMs (or leave them as templates, per setting) with the chosen credentials.
-5. Verify from a test VM: it receives an address, reaches the router, resolves DNS, and blocked paths are actually blocked.
+2. Render a bootstrap `config.xml` that assigns the interfaces (WAN, LAN, one per lab network), sets the management address and an API key, and enables the API. Interface assignment goes here rather than through the API, because the API does not fully cover it.
+3. Pack `config.xml` into a small ISO under `conf/config.xml` and attach it to the cloned OPNsense VM. The OPNsense importer reads ISO9660 media (since 22.1.7), so no console typing is needed.
+4. Start OPNsense, wait for the API, then apply DHCP, DNS, aliases and firewall rules through it (the Ansible `oxlorg.opnsense` collection, formerly `ansibleguy.opnsense`). Pin the OPNsense version to the one the collection supports, because the collection tracks the newest OPNsense API.
+5. Create the Ubuntu VMs with OpenTofu and the `bpg/proxmox` provider (or leave them as templates, per setting) with the chosen credentials through cloud-init.
+6. Verify from a test VM: it receives an address, reaches the router, resolves DNS, and blocked paths are actually blocked.
 
 The host's own management connection stays on the existing network. Moving it behind the router is an optional later feature that must use a confirm-or-revert timer; the "network change undone" screen exists for that case.
 
@@ -174,13 +177,13 @@ The USB is needed only until the handoff is verified:
 - If the copy fails, the USB still holds the original payload, so the handoff can be retried without rebuilding anything.
 - If the user leaves the stick in, nothing breaks: on every boot the SNAP environment sees the existing installation and continues to the internal disk.
 
-Proxmox's own first-boot hook is a possible alternative if the pinned version supports it, but it still needs the payload from the stick.
+**Mechanism (decided, D3):** the handoff uses the Proxmox installer's own first-boot hook (`[first-boot]` with `source = "from-iso"`), which runs as the `proxmox-first-boot` one-shot service. The script `snap-firstboot.sh` is generic, so it is baked into the ISO at build time. It mounts `SNAPDATA` by label, copies and verifies the payload into `/var/lib/snap/`, installs the `snap-resume` service, and starts CRACKLE. Use `ordering = "fully-up"` (the default); `before-network` has reported failures. The observation logic above stays as the safety net: if the hook did not complete, the SNAP environment sees an installed but unhanded-off system on the next USB boot and injects the payload itself.
 
 ---
 
-## 8. Remote access (after BANG, optional)
+## 8. ECHO: remote access (after BANG, optional)
 
-Remote access with Tailscale is a separate command the user runs when they choose. It requires an existing Tailnet and an internet connection, the one operation that cannot be offline. It would install the Tailscale plugin on OPNsense, join the Tailnet using an auth key or OAuth client supplied by the user, advertise the lab subnets, optionally act as an exit node, and verify the result. The user still approves the routes in their Tailscale admin console. A name for this operation is undecided.
+ECHO (`snap echo`) is remote access with Tailscale. It is a separate command the user runs when they choose. It requires an existing Tailnet and an internet connection, the one operation that cannot be offline. It would install the Tailscale plugin on OPNsense, join the Tailnet using an auth key or OAuth client supplied by the user, advertise the lab subnets, optionally act as an exit node, and verify the result. The user still approves the routes in their Tailscale admin console.
 
 ---
 
@@ -217,6 +220,7 @@ core/        schema, engine, state machine
 stages/      snap/ crackle/ pop/ bang/
 frontends/   tui/ (first) headless/
 delivery/    usb/ (first)
+pop/tofu/    OpenTofu configuration for the lab VMs
 tests/       docs/ examples/
 checksums.lock
 ```
@@ -227,29 +231,36 @@ checksums.lock
 
 ## 12. Testing
 
-1. **Every commit, no VMs:** schema validation, rendering of the answer file and OPNsense configuration, `ansible-lint`, `terraform validate`, `shellcheck`.
+1. **Every commit, no VMs:** schema validation, rendering of the answer file and OPNsense configuration, `ansible-lint`, `tofu validate`, `shellcheck`.
 2. **Every commit:** scripted-keystroke tests of the TUI through the whole wizard, checking the resulting `snap.yaml`.
 3. **On real hardware:** the full pipeline on a dedicated computer before milestones. Nested virtualization is deliberately avoided to prevent drift.
 4. **Hardware compatibility list:** maintained from contributor reports.
 
 ---
 
-## 13. Open questions and risks
+## 13. Decisions (settled 2026-10-09)
 
-1. **USB boot chain:** One stick holding the SNAP environment and the unmodified Proxmox installer is the largest unknown. Fallback: run the wizard in the Builder on the user's computer, and make the stick the Proxmox auto-install only.
-2. **OPNsense automation:** Bootstrap by injected configuration, then API configuration, needs an early spike.
-3. **Version-specific behavior:** Answer-file options, first-boot hooks, and installer partition labeling should be verified against the pinned Proxmox release before relying on them.
-4. **Terraform licensing:** Terraform moved to the BUSL license; OpenTofu is the open-source fork with compatible configuration and providers. Decide which the bundle ships, or support both.
-5. **Repository name:** `snap` collides with Ubuntu's `snap`; a distinct repository name is preferable.
-6. **Name for the remote-access operation.**
+| # | Question | Decision |
+| :--- | :--- | :--- |
+| D1 | **USB boot chain** | Still the largest risk, but narrowed. The answer file does not need to be inside the ISO: with `--fetch-from partition`, the ISO prepared by Proxmox's own assistant reads `answer.toml` from a partition labeled `PROXMOX-AIS`, so the wizard can write it at run time. The M1 spike tests, in order: **(a)** our GRUB menu loopback-boots the prepared ISO with no extra kernel arguments (Ventoy-style injected arguments are known to leak into the installed system, so we do not inject any); **(b)** the ISO contents extracted to their own partition. **Fallback:** run the wizard in the Builder and write the stick as the prepared ISO plus the `PROXMOX-AIS` and `SNAPDATA` partitions, with the hardware check moved to the first-boot script. Test on both UEFI and legacy BIOS. |
+| D2 | **OPNsense automation** | Bootstrap `config.xml` delivered on an attached ISO through the OPNsense importer; it holds interface assignment and API access. Everything else goes through the API with `oxlorg.opnsense`. Still needs an early spike in M3 to confirm the importer runs unattended on first boot. |
+| D3 | **Version-specific behavior** | Pin Proxmox VE 9.x (the latest point release at M1) together with the matching `proxmox-auto-install-assistant`. Use the installer's first-boot hook for the handoff (section 7.5). Pin OPNsense to the version `oxlorg.opnsense` supports. All three versions live in `checksums.lock`, and CI validates the answer file with the pinned assistant. |
+| D4 | **Terraform licensing** | **OpenTofu only.** It is MPL-2.0, so it can be redistributed on the USB, and it uses the same `bpg/proxmox` provider. Terraform is not shipped or tested. |
+| D5 | **Repository name** | **`snaplab`.** The project and stage names stay SNAP, CRACKLE, POP and BANG; the command stays `snap`. |
+| D6 | **Remote-access name** | **ECHO** (`snap echo`). |
+
+### Remaining risks
+- The D1 spike may fail on some firmware; the hardware compatibility list records the results.
+- First-boot hook reports from the community are mixed (for example a missing `/firstboot` folder); the observation safety net covers this.
+- The OPNsense collection follows the newest OPNsense API, so OPNsense upgrades need a matching collection upgrade.
 
 ---
 
 ## 14. Milestones
 
 - **M0:** repository, license, `snap.yaml` schema, test layers 1 and 2.
-- **M1:** the USB boot-chain spike, then SNAP end to end: wizard, answer file, unattended install, handoff.
+- **M1:** the USB boot-chain spike (D1), then SNAP end to end: wizard, answer file, unattended install, handoff.
 - **M2:** CRACKLE with the Ubuntu template.
-- **M3:** POP with OPNsense, networks, test VMs, and policy tests.
+- **M3:** the OPNsense importer spike (D2), then POP with OPNsense, networks, test VMs, and policy tests.
 - **M4:** BANG, recovery screens, the Builder, and hardware testing.
 - **Later:** remote access, more delivery methods, Windows images, ZFS and mirrors.
