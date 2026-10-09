@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from snaplab.core import config
 from snaplab.stages.snap import answer
@@ -18,6 +19,10 @@ def main(argv: list[str] | None = None) -> int:
     render = sub.add_parser("answer", help="write the Proxmox installer answer file for a snap.yaml")
     render.add_argument("file", help="path to snap.yaml")
     render.add_argument("-o", "--output", help="where to write answer.toml (default: print it)")
+    usb = sub.add_parser("build", help="build the bootable USB image for a snap.yaml")
+    usb.add_argument("file", help="path to snap.yaml")
+    usb.add_argument("-o", "--output", default="snap.img", help="image to write (default: snap.img)")
+    usb.add_argument("--cache", type=Path, help="download cache (default: $SNAPLAB_CACHE or ~/.cache/snaplab)")
     args = parser.parse_args(argv)
 
     try:
@@ -30,6 +35,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "validate":
         print(f"{args.file}: valid")
+    elif args.command == "build":
+        from snaplab.delivery.usb import build, fetch, image
+
+        try:
+            out = build.build(Path(args.file), Path(args.output), cache=args.cache)
+        except (build.BuildError, fetch.FetchError, image.ImageError) as e:
+            print(f"build failed: {e}", file=sys.stderr)
+            return 1
+        print(f"Write it to a USB stick of 2 GB or more, for example: sudo dd if={out.name} of=/dev/sdX bs=4M")
     elif args.command == "answer":
         text = answer.render(cfg)
         if args.output:

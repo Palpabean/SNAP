@@ -1,5 +1,5 @@
 # Variant of the example with a static management address, a disk chosen by
-# model, and xfs. CI renders it and checks it with the Proxmox assistant.
+# model. CI renders it and checks it with the Proxmox assistant.
 version: 1
 host:
   hostname: lab01
@@ -16,7 +16,7 @@ host:
   root_password_hash: "$6$snaplabexample$K8fOhYIdiN4TrzjDWb9vWtbwjteI61qlgsMRvCaVcn5ZcVnPebJ1WDj2zYo82ktRIKEBOl6rKjYROnq18Unxh/"
   email: admin@example.org
   storage:
-    filesystem: xfs
+    filesystem: ext4
   target_disk:
     model: Samsung_SSD_870_EVO_1TB
 networks:

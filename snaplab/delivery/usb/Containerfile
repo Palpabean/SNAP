@@ -1,0 +1,27 @@
+# Build environment for the SNAP USB image (Design 0001, section 5.1).
+# Everything the builder needs, pinned to the versions in checksums.lock.
+# Runs unprivileged: the image is assembled in a file, with no loop devices.
+#
+#   podman build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
+#   podman run --rm -v "$PWD:/work" snaplab-builder build my-snap.yaml -o snap.img
+#
+# docker works the same way.
+FROM debian:trixie-slim
+
+ARG ASSISTANT_VERSION=9.2.8
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl python3 python3-yaml python3-jsonschema \
+      xorriso mtools dosfstools e2fsprogs fdisk \
+ && curl -fsSL https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg \
+      -o /usr/share/keyrings/proxmox-archive-keyring.gpg \
+ && printf '%s\n' 'Types: deb' 'URIs: http://download.proxmox.com/debian/pve' 'Suites: trixie' \
+      'Components: pve-no-subscription' 'Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg' \
+      > /etc/apt/sources.list.d/pve.sources \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends "proxmox-auto-install-assistant=${ASSISTANT_VERSION}" \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY . /opt/snaplab
+ENV PYTHONPATH=/opt/snaplab SNAPLAB_CACHE=/work/.snaplab-cache
+WORKDIR /work
+ENTRYPOINT ["python3", "-m", "snaplab"]

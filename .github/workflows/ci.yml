@@ -21,7 +21,7 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
-      - run: shellcheck snaplab/stages/snap/*.sh
+      - run: shellcheck snaplab/stages/snap/*.sh snaplab/delivery/usb/*.sh tests/usb/*.sh
       - run: pytest -q
       - run: snaplab validate examples/snap.example.yaml
 
@@ -50,24 +50,20 @@ jobs:
             proxmox-auto-install-assistant validate-answer answer.toml
           done
 
-  # TEMPORARY: inspect the pinned Proxmox ISO's boot layout for the USB builder.
-  iso-inspect:
+  # Build USB images from a stand-in ISO and boot them in QEMU (BIOS and UEFI),
+  # including the "Proxmox is already installed" path, which needs LVM and sudo.
+  usb-image:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
       - run: |
-          sudo apt-get update -q && sudo apt-get install -y -q xorriso mtools fdisk binutils cpio zstd
-          curl -fsSLo pve.iso https://enterprise.proxmox.com/iso/proxmox-ve_9.2-1.iso
-          echo "4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c  pve.iso" | sha256sum -c
-          ls -l pve.iso; blkid pve.iso || true
-          sfdisk -d pve.iso || true
-          xorriso -indev pve.iso -report_el_torito plain -report_system_area plain 2>&1 | tail -40
-          xorriso -osirrox on -indev pve.iso -ls / /boot /boot/grub /EFI /EFI/BOOT 2>&1 | tail -60
-          mkdir x && xorriso -osirrox on -indev pve.iso -extract /boot/grub/grub.cfg x/grub.cfg -extract /boot/initrd.img x/initrd.img 2>/dev/null
-          echo ===== grub.cfg; cat x/grub.cfg
-          echo ===== efi partition; xorriso -indev pve.iso -report_system_area cmd 2>&1 | grep -i append || true
-          off=$(sfdisk -d pve.iso | awk -F'[=,]' '/type=ef|type=EF|C12A7328/{print $2; exit}' | tr -d ' ')
-          echo "efi start sector: $off"
-          if [ -n "$off" ]; then mdir -i pve.iso@@$((off*512)) -/ :: | head -30; for f in $(mdir -i pve.iso@@$((off*512)) -/ -b ::/ | grep -i cfg); do echo "== $f"; mtype -i pve.iso@@$((off*512)) "$f"; done; strings -n 6 $(true) /dev/null; fi
-          echo ===== initrd init device scan
-          cd x && mkdir ird && cd ird && (zstd -dc ../initrd.img 2>/dev/null || gzip -dc ../initrd.img 2>/dev/null || cat ../initrd.img) | cpio -idm 2>/dev/null; ls
-          grep -n -i -E 'sys/block|/dev/sd|cd-info|iso9660|for .* in .*dev|mount ' init 2>/dev/null | head -60
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends xorriso grub-common grub-pc-bin grub-efi-amd64-bin \
+            mtools dosfstools e2fsprogs fdisk qemu-system-x86 ovmf lvm2
+      - run: pip install -e '.[dev]'
+      - run: pytest -v -rs tests/test_usb_build.py
+        env:
+          SNAPLAB_TEST_LVM: "1"

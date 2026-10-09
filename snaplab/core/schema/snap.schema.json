@@ -102,7 +102,11 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "filesystem": { "enum": ["ext4", "xfs"], "default": "ext4" }
+            "filesystem": {
+              "description": "ext4 only for now: the USB boot menu detects an existing install the way Proxmox's Rescue Boot does, which reads ext4 on the pve LVM volume group.",
+              "enum": ["ext4"],
+              "default": "ext4"
+            }
           }
         },
         "target_disk": {

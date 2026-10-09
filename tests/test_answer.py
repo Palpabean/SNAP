@@ -64,7 +64,7 @@ def test_disk_by_serial(cfg):
 
 def test_disk_by_model():
     disk = parsed(config.load(STATIC))["disk-setup"]
-    assert disk == {"filesystem": "xfs", "filter": {"ID_MODEL": "Samsung_SSD_870_EVO_1TB"}}
+    assert disk == {"filesystem": "ext4", "filter": {"ID_MODEL": "Samsung_SSD_870_EVO_1TB"}}
 
 
 def test_filesystem_defaults_to_ext4(cfg):

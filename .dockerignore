@@ -1,0 +1,7 @@
+.git
+.snaplab-cache
+e2e-work
+*.img
+*.iso
+**/__pycache__
+.venv
