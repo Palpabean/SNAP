@@ -151,7 +151,7 @@ Passwords are stored only as hashes. Real configs containing any secret are neve
 ### 7.3 POP (stage 3, on the host)
 1. Render the network model from `snap.yaml`: subnets, VLANs, DHCP, DNS, firewall rules.
 2. Render a bootstrap `config.xml` that assigns the interfaces (WAN, LAN, one per lab network), sets the management address and an API key, and enables the API. Interface assignment goes here rather than through the API, because the API does not fully cover it.
-3. Pack `config.xml` into a small ISO under `conf/config.xml` and attach it to the cloned OPNsense VM. The OPNsense importer reads ISO9660 media (since 22.1.7), so no console typing is needed.
+3. Pack `config.xml` into a small ISO under `conf/config.xml` and attach it to the cloned OPNsense VM. The OPNsense importer reads ISO9660 media (since 22.1.7). Whether it imports without a keypress at the console is what the D2 spike must confirm.
 4. Start OPNsense, wait for the API, then apply DHCP, DNS, aliases and firewall rules through it (the Ansible `oxlorg.opnsense` collection, formerly `ansibleguy.opnsense`). Pin the OPNsense version to the one the collection supports, because the collection tracks the newest OPNsense API.
 5. Create the Ubuntu VMs with OpenTofu and the `bpg/proxmox` provider (or leave them as templates, per setting) with the chosen credentials through cloud-init.
 6. Verify from a test VM: it receives an address, reaches the router, resolves DNS, and blocked paths are actually blocked.
