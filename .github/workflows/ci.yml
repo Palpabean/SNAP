@@ -50,17 +50,24 @@ jobs:
             proxmox-auto-install-assistant validate-answer answer.toml
           done
 
-  # TEMPORARY: print the official ISO checksums and assistant versions to pin in checksums.lock.
-  pin-info:
+  # TEMPORARY: inspect the pinned Proxmox ISO's boot layout for the USB builder.
+  iso-inspect:
     runs-on: ubuntu-latest
-    container: debian:trixie
     steps:
       - run: |
-          apt-get update && apt-get install -y --no-install-recommends ca-certificates curl
-          curl -fsSL https://enterprise.proxmox.com/iso/SHA256SUMS | grep -E 'proxmox-ve_(8|9)'
-          curl -fsSL https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg -o /usr/share/keyrings/proxmox-archive-keyring.gpg
-          printf '%s\n' 'Types: deb' 'URIs: http://download.proxmox.com/debian/pve' 'Suites: trixie' \
-            'Components: pve-no-subscription' 'Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg' \
-            > /etc/apt/sources.list.d/pve.sources
-          apt-get update && apt-cache madison proxmox-auto-install-assistant
-          ls -l /dev/kvm || true
+          sudo apt-get update -q && sudo apt-get install -y -q xorriso mtools fdisk binutils cpio zstd
+          curl -fsSLo pve.iso https://enterprise.proxmox.com/iso/proxmox-ve_9.2-1.iso
+          echo "4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c  pve.iso" | sha256sum -c
+          ls -l pve.iso; blkid pve.iso || true
+          sfdisk -d pve.iso || true
+          xorriso -indev pve.iso -report_el_torito plain -report_system_area plain 2>&1 | tail -40
+          xorriso -osirrox on -indev pve.iso -ls / /boot /boot/grub /EFI /EFI/BOOT 2>&1 | tail -60
+          mkdir x && xorriso -osirrox on -indev pve.iso -extract /boot/grub/grub.cfg x/grub.cfg -extract /boot/initrd.img x/initrd.img 2>/dev/null
+          echo ===== grub.cfg; cat x/grub.cfg
+          echo ===== efi partition; xorriso -indev pve.iso -report_system_area cmd 2>&1 | grep -i append || true
+          off=$(sfdisk -d pve.iso | awk -F'[=,]' '/type=ef|type=EF|C12A7328/{print $2; exit}' | tr -d ' ')
+          echo "efi start sector: $off"
+          if [ -n "$off" ]; then mdir -i pve.iso@@$((off*512)) -/ :: | head -30; for f in $(mdir -i pve.iso@@$((off*512)) -/ -b ::/ | grep -i cfg); do echo "== $f"; mtype -i pve.iso@@$((off*512)) "$f"; done; strings -n 6 $(true) /dev/null; fi
+          echo ===== initrd init device scan
+          cd x && mkdir ird && cd ird && (zstd -dc ../initrd.img 2>/dev/null || gzip -dc ../initrd.img 2>/dev/null || cat ../initrd.img) | cpio -idm 2>/dev/null; ls
+          grep -n -i -E 'sys/block|/dev/sd|cd-info|iso9660|for .* in .*dev|mount ' init 2>/dev/null | head -60
