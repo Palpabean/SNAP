@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/palpabean/snaplab/schema/snap.schema.json",
+  "title": "snap.yaml",
+  "description": "The single source of truth for a SNAP lab (Design 0001, section 6). Structural rules live here; rules that span fields (address ranges, references between sections) are checked in snaplab.core.config.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "host", "networks", "machines"],
+  "properties": {
+    "version": {
+      "description": "Schema version. Bumped on any incompatible change.",
+      "const": 1
+    },
+    "host": { "$ref": "#/$defs/host" },
+    "networks": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/network" }
+    },
+    "machines": { "$ref": "#/$defs/machines" },
+    "options": { "$ref": "#/$defs/options" }
+  },
+  "$defs": {
+    "name": {
+      "description": "Lower-case DNS label.",
+      "type": "string",
+      "pattern": "^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "ipv4": { "type": "string", "format": "ipv4" },
+    "cidr": {
+      "description": "IPv4 network in CIDR notation, for example 10.10.0.0/24.",
+      "type": "string",
+      "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$"
+    },
+    "interface_cidr": {
+      "description": "IPv4 address with prefix length, for example 192.168.1.10/24.",
+      "type": "string",
+      "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$"
+    },
+    "password_hash": {
+      "description": "crypt(3) hash: yescrypt ($y$), SHA-512 ($6$) or SHA-256 ($5$). Plaintext passwords are never accepted.",
+      "type": "string",
+      "pattern": "^\\$(y|6|5)\\$[^\\s]+$"
+    },
+    "ssh_key": {
+      "type": "string",
+      "pattern": "^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\\.com|sk-ecdsa-sha2-nistp256@openssh\\.com) [A-Za-z0-9+/=]+( .*)?$"
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hostname", "domain", "timezone", "keyboard", "management", "root_password_hash", "email", "target_disk"],
+      "properties": {
+        "hostname": { "$ref": "#/$defs/name" },
+        "domain": {
+          "type": "string",
+          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+        },
+        "timezone": {
+          "description": "IANA time zone, for example America/New_York or UTC.",
+          "type": "string",
+          "pattern": "^(UTC|[A-Za-z_]+(/[A-Za-z0-9_+-]+)+)$"
+        },
+        "keyboard": {
+          "description": "Proxmox installer keyboard layout code, for example en-us or de.",
+          "type": "string",
+          "pattern": "^[a-z]{2}(-[a-z]{2,3})?$"
+        },
+        "management": {
+          "description": "The host's own management connection. It stays on the existing network (Design 0001, section 7.3).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "enum": ["dhcp", "static"] },
+            "address": { "$ref": "#/$defs/interface_cidr" },
+            "gateway": { "$ref": "#/$defs/ipv4" },
+            "dns": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ipv4" } }
+          },
+          "if": { "properties": { "mode": { "const": "static" } } },
+          "then": { "required": ["address", "gateway", "dns"] },
+          "else": { "not": { "anyOf": [{ "required": ["address"] }, { "required": ["gateway"] }, { "required": ["dns"] }] } }
+        },
+        "root_password_hash": { "$ref": "#/$defs/password_hash" },
+        "email": {
+          "description": "Where Proxmox sends alerts.",
+          "type": "string",
+          "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+        },
+        "storage": {
+          "description": "Single-disk layouts only in the proof of concept.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "filesystem": { "enum": ["ext4", "xfs"], "default": "ext4" }
+          }
+        },
+        "target_disk": {
+          "description": "The disk Proxmox is installed on. Matched by serial (preferred) or model, never by device name, which can change between boots.",
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "maxProperties": 1,
+          "properties": {
+            "serial": { "type": "string", "minLength": 4 },
+            "model": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "cidr", "router", "policy"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "cidr": { "$ref": "#/$defs/cidr" },
+        "router": {
+          "description": "The OPNsense address on this network, inside cidr.",
+          "$ref": "#/$defs/ipv4"
+        },
+        "dns": {
+          "description": "DNS servers handed out by DHCP. Defaults to the router.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/ipv4" }
+        },
+        "dhcp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "start": { "$ref": "#/$defs/ipv4" },
+            "end": { "$ref": "#/$defs/ipv4" }
+          },
+          "if": { "properties": { "enabled": { "const": true } } },
+          "then": { "required": ["start", "end"] }
+        },
+        "vlan": { "type": "integer", "minimum": 1, "maximum": 4094 },
+        "upstream": {
+          "description": "Where this network's internet-bound traffic leaves the lab. Only the OPNsense WAN for now.",
+          "const": "wan",
+          "default": "wan"
+        },
+        "policy": {
+          "description": "isolated: no traffic beyond this network. internet-only: internet but not other lab networks. open: internet and every other lab network.",
+          "enum": ["isolated", "internet-only", "open"]
+        },
+        "rules": {
+          "description": "Custom rules applied before the policy.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/rule" }
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "to"],
+      "properties": {
+        "action": { "enum": ["allow", "block"] },
+        "to": {
+          "description": "Another lab network by name, 'internet', or a CIDR.",
+          "type": "string"
+        },
+        "protocol": { "enum": ["tcp", "udp", "icmp", "any"], "default": "any" },
+        "ports": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 1, "maximum": 65535 }
+        },
+        "description": { "type": "string" }
+      }
+    },
+    "machines": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "name_prefix", "image", "network", "username"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0, "maximum": 50 },
+        "name_prefix": { "$ref": "#/$defs/name" },
+        "image": { "enum": ["ubuntu-24.04"] },
+        "cpu": { "type": "integer", "minimum": 1, "maximum": 64, "default": 2 },
+        "memory_mb": { "type": "integer", "minimum": 512, "default": 2048 },
+        "disk_gb": { "type": "integer", "minimum": 4, "default": 20 },
+        "network": {
+          "description": "Name of one of the networks.",
+          "$ref": "#/$defs/name"
+        },
+        "username": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_-]{0,31}$",
+          "not": { "enum": ["root"] }
+        },
+        "password_hash": { "$ref": "#/$defs/password_hash" },
+        "ssh_keys": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ssh_key" } },
+        "mode": {
+          "description": "create: build the VMs now. templates-only: stop at the template.",
+          "enum": ["create", "templates-only"],
+          "default": "create"
+        }
+      },
+      "anyOf": [{ "required": ["password_hash"] }, { "required": ["ssh_keys"] }]
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "offline": { "type": "boolean", "default": true },
+        "log_level": { "enum": ["debug", "info", "warning", "error"], "default": "info" }
+      }
+    }
+  }
+}

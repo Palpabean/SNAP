@@ -1,0 +1,63 @@
+# Sanitized example of snap.yaml (Design 0001, section 6).
+#
+# Copy it, then replace every placeholder. Never commit your real snap.yaml.
+# Make password hashes with:  openssl passwd -6
+# The hashes below are for the password "changeme" and must not be used as-is.
+version: 1
+
+host:
+  hostname: pve
+  domain: lab.example
+  timezone: America/New_York
+  keyboard: en-us
+  management:
+    mode: dhcp                 # or static, with address, gateway and dns
+  root_password_hash: "$6$snaplabexample$K8fOhYIdiN4TrzjDWb9vWtbwjteI61qlgsMRvCaVcn5ZcVnPebJ1WDj2zYo82ktRIKEBOl6rKjYROnq18Unxh/"
+  email: admin@lab.example
+  storage:
+    filesystem: ext4
+  target_disk:
+    serial: S4EWNX0R123456     # the wizard fills this in from the disk you confirm
+
+networks:
+  - name: lab
+    cidr: 10.10.10.0/24
+    router: 10.10.10.1
+    vlan: 10
+    dhcp:
+      enabled: true
+      start: 10.10.10.100
+      end: 10.10.10.199
+    policy: internet-only
+    rules:
+      - action: allow
+        to: services
+        protocol: tcp
+        ports: [22, 443]
+        description: Lab machines may reach the service network over SSH and HTTPS
+
+  - name: services
+    cidr: 10.10.20.0/24
+    router: 10.10.20.1
+    vlan: 20
+    dhcp:
+      enabled: true
+      start: 10.10.20.100
+      end: 10.10.20.199
+    policy: isolated
+
+machines:
+  count: 3
+  name_prefix: ubuntu
+  image: ubuntu-24.04
+  cpu: 2
+  memory_mb: 2048
+  disk_gb: 20
+  network: lab
+  username: labuser
+  password_hash: "$6$snaplabexample$K8fOhYIdiN4TrzjDWb9vWtbwjteI61qlgsMRvCaVcn5ZcVnPebJ1WDj2zYo82ktRIKEBOl6rKjYROnq18Unxh/"
+  mode: create
+
+options:
+  offline: true
+  log_level: info
