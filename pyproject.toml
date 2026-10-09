@@ -25,6 +25,7 @@ include = ["snaplab*"]
 
 [tool.setuptools.package-data]
 "snaplab.core.schema" = ["*.json"]
+"snaplab.stages.snap" = ["*.sh"]
 
 [tool.ruff]
 line-length = 120

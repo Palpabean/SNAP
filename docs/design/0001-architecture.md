@@ -93,7 +93,7 @@ USER'S COMPUTER                                    TARGET COMPUTER
 ### 5.2 The USB
 - A bootloader menu with: Boot through USB: guided setup (default), Proxmox auto-install, advanced command line, memory test, and boot from internal disk.
 - A small FAT partition labeled `PROXMOX-AIS`, where the wizard writes the rendered `answer.toml`. The Proxmox installer looks for this label when the ISO is prepared with `--fetch-from partition`; the label is fixed by the installer, not by us.
-- A data partition labeled `SNAPDATA` for `snap.yaml`, the payload, and `checksums.lock`.
+- A data partition labeled `SNAPDATA` holding `payload.sha256` (a `sha256sum` manifest of every other file), `snap.yaml`, `bin/snap` (the engine entry point), and the rest of the payload.
 - The prepared Proxmox ISO, booted from our own GRUB menu. How it is booted is the M1 spike (see decision D1 in section 13).
 
 ### 5.3 The live environment and TUI
@@ -245,7 +245,7 @@ The code lives in one Python package, `snaplab`, so the parts can import each ot
 
 | # | Question | Decision |
 | :--- | :--- | :--- |
-| D1 | **USB boot chain** | Still the largest risk, but narrowed. The answer file does not need to be inside the ISO: with `--fetch-from partition`, the ISO prepared by Proxmox's own assistant reads `answer.toml` from a partition labeled `PROXMOX-AIS`, so the wizard can write it at run time. The M1 spike tests, in order: **(a)** our GRUB menu loopback-boots the prepared ISO with no extra kernel arguments (Ventoy-style injected arguments are known to leak into the installed system, so we do not inject any); **(b)** the ISO contents extracted to their own partition. **Fallback:** run the wizard in the Builder and write the stick as the prepared ISO plus the `PROXMOX-AIS` and `SNAPDATA` partitions, with the hardware check moved to the first-boot script. Test on both UEFI and legacy BIOS. |
+| D1 | **USB boot chain** | **One stick holds everything** (decided by the project owner). The SNAP environment, the assistant-prepared Proxmox ISO, a `PROXMOX-AIS` partition for `answer.toml`, and a `SNAPDATA` partition for the payload all live on one USB. The ISO reads `answer.toml` from `PROXMOX-AIS` (`--fetch-from partition`), so the wizard writes it at run time. Our GRUB menu boots the ISO with no extra kernel arguments (Ventoy-style injected arguments are known to leak into the installed system). Keep the stack lightweight: only tools already present in Debian and Proxmox on the target. M1 still verifies this on both UEFI and legacy BIOS. |
 | D2 | **OPNsense automation** | Bootstrap `config.xml` delivered on an attached ISO through the OPNsense importer; it holds interface assignment and API access. Everything else goes through the API with `oxlorg.opnsense`. Still needs an early spike in M3 to confirm the importer runs unattended on first boot. |
 | D3 | **Version-specific behavior** | Pin Proxmox VE 9.x (the latest point release at M1) together with the matching `proxmox-auto-install-assistant`. Use the installer's first-boot hook for the handoff (section 7.5). Pin OPNsense to the version `oxlorg.opnsense` supports. All three versions live in `checksums.lock`, and CI validates the answer file with the pinned assistant. |
 | D4 | **Terraform licensing** | **OpenTofu only.** It is MPL-2.0, so it can be redistributed on the USB, and it uses the same `bpg/proxmox` provider. Terraform is not shipped or tested. |

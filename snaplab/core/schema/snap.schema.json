@@ -49,12 +49,17 @@
     "host": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["hostname", "domain", "timezone", "keyboard", "management", "root_password_hash", "email", "target_disk"],
+      "required": ["hostname", "domain", "country", "timezone", "keyboard", "management", "root_password_hash", "email", "target_disk"],
       "properties": {
         "hostname": { "$ref": "#/$defs/name" },
         "domain": {
           "type": "string",
           "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+        },
+        "country": {
+          "description": "Two-letter ISO 3166 country code, lower case, for example us. The Proxmox installer uses it to pick package mirrors.",
+          "type": "string",
+          "pattern": "^[a-z]{2}$"
         },
         "timezone": {
           "description": "IANA time zone, for example America/New_York or UTC.",
@@ -73,13 +78,18 @@
           "required": ["mode"],
           "properties": {
             "mode": { "enum": ["dhcp", "static"] },
+            "mac": {
+              "description": "MAC address of the network port the static address goes on. The wizard fills it in.",
+              "type": "string",
+              "pattern": "^([0-9a-f]{2}:){5}[0-9a-f]{2}$"
+            },
             "address": { "$ref": "#/$defs/interface_cidr" },
             "gateway": { "$ref": "#/$defs/ipv4" },
             "dns": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ipv4" } }
           },
           "if": { "properties": { "mode": { "const": "static" } } },
-          "then": { "required": ["address", "gateway", "dns"] },
-          "else": { "not": { "anyOf": [{ "required": ["address"] }, { "required": ["gateway"] }, { "required": ["dns"] }] } }
+          "then": { "required": ["mac", "address", "gateway", "dns"] },
+          "else": { "not": { "anyOf": [{ "required": ["mac"] }, { "required": ["address"] }, { "required": ["gateway"] }, { "required": ["dns"] }] } }
         },
         "root_password_hash": { "$ref": "#/$defs/password_hash" },
         "email": {
@@ -96,7 +106,7 @@
           }
         },
         "target_disk": {
-          "description": "The disk Proxmox is installed on. Matched by serial (preferred) or model, never by device name, which can change between boots.",
+          "description": "The disk Proxmox is installed on. Matched by serial (preferred) or model, never by device name, which can change between boots. Values are as udev reports them (ID_SERIAL_SHORT, ID_MODEL); the wizard fills them in. A model must match exactly one disk.",
           "type": "object",
           "additionalProperties": false,
           "minProperties": 1,

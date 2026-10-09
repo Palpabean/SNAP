@@ -8,10 +8,11 @@ version: 1
 host:
   hostname: pve
   domain: lab.example
+  country: us
   timezone: America/New_York
   keyboard: en-us
   management:
-    mode: dhcp                 # or static, with address, gateway and dns
+    mode: dhcp                 # or static, with mac, address, gateway and dns
   root_password_hash: "$6$snaplabexample$K8fOhYIdiN4TrzjDWb9vWtbwjteI61qlgsMRvCaVcn5ZcVnPebJ1WDj2zYo82ktRIKEBOl6rKjYROnq18Unxh/"
   email: admin@lab.example
   storage:
