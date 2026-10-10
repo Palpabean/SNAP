@@ -67,3 +67,24 @@ jobs:
       - run: pytest -v -rs tests/test_usb_build.py
         env:
           SNAPLAB_TEST_LVM: "1"
+
+  # TEMPORARY: look up versions and checksums to pin OpenTofu, the bpg/proxmox provider and Ansible.
+  pin-info:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - run: |
+          apt-get update -q && apt-get install -y -q --no-install-recommends ca-certificates curl python3 jq
+          for r in opentofu/opentofu bpg/terraform-provider-proxmox; do
+            tag=$(curl -fsSL https://api.github.com/repos/$r/releases/latest | jq -r .tag_name)
+            echo "== $r $tag"
+            curl -fsSL https://api.github.com/repos/$r/releases/tags/$tag | jq -r '.assets[].browser_download_url' | grep -E 'linux_amd64.zip$|SHA256SUMS$'
+            sums=$(curl -fsSL https://api.github.com/repos/$r/releases/tags/$tag | jq -r '.assets[].browser_download_url' | grep -E 'SHA256SUMS$' | head -1)
+            curl -fsSL "$sums" | grep linux_amd64.zip
+          done
+          echo "== debian trixie ansible"
+          apt-cache policy ansible-core python3-httpx | grep -E '^[a-z]|Candidate'
+          apt-get install -y -q --no-install-recommends ansible-core >/dev/null && ansible --version | head -1
+          echo "== galaxy"
+          cd /tmp && ansible-galaxy collection download oxlorg.opnsense community.general -p dl >/dev/null 2>&1; ls dl; sha256sum dl/*.tar.gz
+          cat dl/requirements.yml
