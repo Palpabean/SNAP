@@ -24,7 +24,8 @@ LABEL=SNAPDATA
 STATE_DIR="$ROOT/var/lib/snap"
 LOG_DIR="$ROOT/var/log/snap"
 UNIT="$ROOT/etc/systemd/system/snap-resume.service"
-DONE="$STATE_DIR/handoff.done"
+# Progress markers, one per finished stage; the USB boot menu reads them.
+DONE="$STATE_DIR/progress/snap.done"
 
 mkdir -p "$LOG_DIR"
 exec > >(tee -a "$LOG_DIR/firstboot.log") 2>&1
@@ -83,7 +84,7 @@ Description=SNAP: continue lab setup (CRACKLE, POP, BANG)
 Wants=network-online.target
 After=network-online.target pve-cluster.service pveproxy.service
 ConditionPathExists=/var/lib/snap/bin/snap
-ConditionPathExists=!/var/lib/snap/lab.ready
+ConditionPathExists=!/var/lib/snap/progress/bang.done
 
 [Service]
 Type=oneshot
@@ -94,6 +95,7 @@ ExecStart=/var/lib/snap/bin/snap resume
 WantedBy=multi-user.target
 EOF
 
+mkdir -p "$(dirname "$DONE")"
 touch "$DONE"
 if [ -z "$ROOT" ]; then
     systemctl daemon-reload

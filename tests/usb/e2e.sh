@@ -42,6 +42,7 @@ qemu() {
 }
 
 echo "== pass 1: unattended install ($FIRMWARE)"
+# The SNAP menu shows on screen and serial; its default entry starts the install.
 start=$(date +%s)
 if ! qemu "$WORK/pass1.log" 45m; then
     echo "e2e: the install did not finish and restart within 45 minutes" >&2
@@ -53,7 +54,7 @@ echo "install finished in $(( $(date +%s) - start ))s"
 echo "== pass 2: boot the stick again, expect it to start the installed system"
 qemu "$WORK/pass2.log" 6m || true    # the installed system keeps running; stop it after the handoff
 tr -d '\r' < "$WORK/pass2.log" | grep -a "SNAP" || true
-grep -aq "SNAP: Proxmox VE is already installed" "$WORK/pass2.log" || {
+grep -aq "SNAP: starting the installed Proxmox VE." "$WORK/pass2.log" || {
     echo "e2e: the stick's menu did not detect the installed system" >&2
     exit 1
 }
@@ -66,7 +67,7 @@ sudo vgchange -q -ay pve
 mkdir -p "$WORK/mnt"
 sudo mount -o ro /dev/pve/root "$WORK/mnt"
 sudo cat "$WORK/mnt/var/log/snap/firstboot.log"
-sudo test -e "$WORK/mnt/var/lib/snap/handoff.done"
+sudo test -e "$WORK/mnt/var/lib/snap/progress/snap.done"
 sudo cmp "$WORK/mnt/var/lib/snap/snap.yaml" examples/snap.example.yaml
 sudo test -L "$WORK/mnt/etc/systemd/system/multi-user.target.wants/snap-resume.service"
 sudo journalctl -D "$WORK/mnt/var/log/journal" --no-pager 2>/dev/null | grep -a "SNAP:" || true

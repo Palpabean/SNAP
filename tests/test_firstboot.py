@@ -38,7 +38,7 @@ def test_handoff(tmp_path, stick):
     state = root / "var/lib/snap"
     assert (state / "snap.yaml").read_text() == "version: 1\n"
     assert (state / "bin/snap").exists()
-    assert (state / "handoff.done").exists()
+    assert (state / "progress" / "snap.done").exists()
     assert not (tmp_path / "root/var/lib/snap.partial").exists()
     assert oct(state.stat().st_mode & 0o077) == "0o0"
     unit = (root / "etc/systemd/system/snap-resume.service").read_text()
@@ -64,7 +64,7 @@ def test_damaged_stick_is_refused(tmp_path, stick):
     result = run(root, stick)
     assert result.returncode == 1
     assert "do not match their checksums" in result.stdout
-    assert not (root / "var/lib/snap/handoff.done").exists()
+    assert not (root / "var/lib/snap/progress/snap.done").exists()
     assert not (root / "etc/systemd/system/snap-resume.service").exists()
 
 
@@ -82,4 +82,4 @@ def test_retry_after_failure_succeeds(tmp_path, stick):
     assert run(root, stick).returncode == 1
     (stick / "bin/snap").write_text(good)
     assert run(root, stick).returncode == 0
-    assert (root / "var/lib/snap/handoff.done").exists()
+    assert (root / "var/lib/snap/progress/snap.done").exists()

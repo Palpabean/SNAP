@@ -22,7 +22,7 @@ from importlib import resources
 from pathlib import Path
 
 from snaplab.core import config
-from snaplab.delivery.usb import fetch, image
+from snaplab.delivery.usb import fetch, image, menu
 from snaplab.stages.snap import answer
 
 ASSISTANT = "proxmox-auto-install-assistant"
@@ -138,7 +138,11 @@ def build(config_path: Path, output: Path, cache: Path | None = None, lock_path:
 
         log("assembling the USB image")
         stick = work / "snap.img"
-        image.wrap_boot_menu(prepared, Path(str(resources.files("snaplab.delivery.usb") / "grub-snap.cfg")), stick)
+        try:
+            menu_files = menu.files(image.read_file(prepared, "/boot/grub/grub.cfg"))
+        except menu.MenuError as e:
+            raise BuildError(str(e)) from e
+        image.replace_boot_menu(prepared, menu_files, stick)
         image.assemble(stick, work / "ais.img", work / "data.img", stick)
         stick.replace(output)
 

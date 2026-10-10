@@ -3,7 +3,7 @@
 The stick is the Proxmox installer's own hybrid ISO, written from the first
 sector exactly as Proxmox intends, with two partitions appended after it:
 
-    | Proxmox ISO (prepared, boot menu wrapped) | PROXMOX-AIS (FAT) | SNAPDATA (ext4) |
+    | Proxmox ISO (prepared, SNAP boot menu) | PROXMOX-AIS (FAT) | SNAPDATA (ext4) |
 
 Everything happens in a regular file with xorriso, mkfs.vfat, mtools, mkfs.ext4
 and sfdisk, so no loop devices or root privileges are needed.
@@ -11,6 +11,7 @@ and sfdisk, so no loop devices or root privileges are needed.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -28,6 +29,8 @@ TYPE_LINUX_DATA = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
 AIS_LABEL = "PROXMOX-AIS"
 DATA_LABEL = "SNAPDATA"
 AIS_SIZE = 4 * MIB
+# The ISO's first 32 KiB: boot code, MBR and GPT.
+SYSTEM_AREA = 32 * 1024
 
 
 class ImageError(Exception):
@@ -91,40 +94,36 @@ def iso_uuid(path: Path) -> str:
 # --- steps -----------------------------------------------------------------
 
 
-def wrap_boot_menu(prepared_iso: Path, wrapper_cfg: Path, out: Path) -> None:
-    """Copy the ISO with our boot menu in front of Proxmox's, keeping its boot setup and UUID."""
-    uuid = iso_uuid(prepared_iso)
+def read_file(iso: Path, path: str) -> str:
+    """Read one file from an ISO."""
     with tempfile.TemporaryDirectory() as tmp:
-        pve_cfg = Path(tmp) / "pve.cfg"
-        run(["xorriso", "-osirrox", "on", "-indev", str(prepared_iso), "-extract", "/boot/grub/grub.cfg", str(pve_cfg)])
-        out.unlink(missing_ok=True)
-        run(
-            [
-                "xorriso",
-                "-indev",
-                str(prepared_iso),
-                "-outdev",
-                str(out),
-                "-boot_image",
-                "any",
-                "replay",
-                # Replaying the Apple HFS+ hybrid fails with overlapping GPT entries;
-                # SNAP does not target Macs, and BIOS and UEFI boot are unaffected.
-                "-hfsplus",
-                "off",
-                "-volume_date",
-                "uuid",
-                uuid,
-                "-map",
-                str(pve_cfg),
-                "/boot/grub/pve.cfg",
-                "-map",
-                str(wrapper_cfg),
-                "/boot/grub/grub.cfg",
-            ]  # fmt: skip
-        )
+        out = Path(tmp) / "file"
+        run(["xorriso", "-osirrox", "on", "-indev", str(iso), "-extract", path, str(out)])
+        return out.read_text()
+
+
+def replace_boot_menu(prepared_iso: Path, files: dict[str, bytes], out: Path) -> None:
+    """Copy the ISO and replace or add `files` (ISO path to content), leaving its boot setup untouched.
+
+    The change is appended as a new ISO session instead of rebuilding the image,
+    so the boot code, partition tables and El Torito records stay byte for byte
+    as Proxmox made them. The volume UUID, which Proxmox's EFI GRUB searches
+    for, is kept.
+    """
+    uuid = iso_uuid(prepared_iso)
+    shutil.copyfile(prepared_iso, out)
+    with tempfile.TemporaryDirectory() as tmp:
+        maps = []
+        for i, (iso_path, content) in enumerate(files.items()):
+            local = Path(tmp) / str(i)
+            local.write_bytes(content)
+            maps += ["-map", str(local), iso_path]
+        run(["xorriso", "-dev", str(out), "-boot_image", "any", "keep", "-volume_date", "uuid", uuid, *maps, "-commit"])
     if iso_uuid(out) != uuid:
-        raise ImageError("the remastered ISO lost its volume UUID; it would not boot on UEFI")
+        raise ImageError("the ISO lost its volume UUID; it would not boot on UEFI")
+    with prepared_iso.open("rb") as a, out.open("rb") as b:
+        if a.read(SYSTEM_AREA) != b.read(SYSTEM_AREA):
+            raise ImageError("the ISO's boot code or partition table changed; refusing it")
 
 
 def make_ais(answer_toml: Path, out: Path) -> None:

@@ -9,13 +9,15 @@ also need QEMU and OVMF. CI's usb-image job installs all of them.
 
 import json
 import os
+import select
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
-from snaplab.delivery.usb import build, fetch, image
+from snaplab.delivery.usb import build, fetch, image, menu
 
 ROOT = Path(__file__).parent.parent
 EXAMPLE = ROOT / "examples" / "snap.example.yaml"
@@ -47,12 +49,21 @@ case "$1" in
 esac
 """
 
-STANDIN_GRUB_CFG = """serial --unit=0 --speed=115200
-terminal_input --append serial
-terminal_output --append serial
-set timeout=1
-menuentry 'stand-in installer' { echo STANDIN-INSTALLER-STARTED; halt }
-echo "STANDIN-MENU platform=$grub_platform"
+# Shaped like the Proxmox VE 9.2 menu: the builder copies the automated entry's
+# linux and initrd lines into the SNAP menu and must never show this menu.
+STANDIN_GRUB_CFG = """set timeout=10
+if [ -f auto-installer-mode.toml ]; then
+    menuentry 'Install Proxmox VE (Automated)' --class debian --class gnu-linux --class gnu --class os {
+        echo        'Loading Proxmox VE Automatic Installer ...'
+        linux       /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent proxmox-start-auto-installer
+        echo        'Loading initial ramdisk ...'
+        initrd      /boot/initrd.img
+     }
+fi
+menuentry 'Install Proxmox VE (Graphical)' --class debian --class gnu-linux --class gnu --class os {
+    linux\t/boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent
+    initrd\t/boot/initrd.img
+}
 """
 
 
@@ -99,6 +110,8 @@ def built(tmp_path_factory):
     root = tmp / "isoroot" / "boot" / "grub"
     root.mkdir(parents=True)
     (root / "grub.cfg").write_text(STANDIN_GRUB_CFG)
+    (root.parent / "linux26").write_text("stand-in kernel\n")
+    (root.parent / "initrd.img").write_text("stand-in initrd\n")
     iso = tmp / "mirror" / "proxmox-ve_9.2-1.iso"
     iso.parent.mkdir()
     subprocess.run(["grub-mkrescue", "-o", str(iso), str(tmp / "isoroot")], check=True, capture_output=True)
@@ -170,26 +183,30 @@ def test_data_partition(built, tmp_path):
 
 
 @needs_image_tools
-def test_wrapped_boot_menu(built, tmp_path):
-    img, _ = built
-    out = tmp_path / "cfg"
-    out.mkdir()
-    subprocess.run(
-        ["xorriso", "-osirrox", "on", "-indev", str(img), "-extract", "/boot/grub", str(out / "grub")],
-        check=True,
-        capture_output=True,
-    )
-    assert "(lvm/pve-root)" in (out / "grub" / "grub.cfg").read_text()
-    assert (out / "grub" / "pve.cfg").read_text() == STANDIN_GRUB_CFG
+def test_boot_menu_replaces_proxmox_menu(built):
+    img, iso = built
+    shipped = image.read_file(img, "/boot/grub/grub.cfg")
+    assert shipped == menu.render(STANDIN_GRUB_CFG)
+    assert "Install Proxmox VE (Graphical)" not in shipped
+    assert "linux /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent proxmox-start-auto-installer" in shipped
+    # Everything else on the ISO is untouched.
+    assert image.read_file(img, "/boot/initrd.img") == image.read_file(iso, "/boot/initrd.img")
 
 
 # --- boot ------------------------------------------------------------------
 
 
-def boot(img: Path, tmp_path: Path, uefi: bool) -> str:
-    disk = tmp_path / "stick.img"
-    shutil.copyfile(img, disk)
-    cmd = ["qemu-system-x86_64", "-m", "512", "-nographic", "-no-reboot", "-nodefaults", "-serial", "stdio"]
+def boot(img: Path, tmp_path: Path, uefi: bool, until: str, target: Path | None = None, seconds: int = 120) -> str:
+    """Boot the stick in QEMU and return what appeared on the serial console up to `until`.
+
+    The stand-in kernels cannot start, so GRUB would end at an error and wait; stop as soon as
+    `until` appears, or after `seconds`.
+    """
+    stick = tmp_path / "stick.img"
+    shutil.copyfile(img, stick)
+    # A display adapter like every real PC has (the menu is themed on it), plus a serial console to read.
+    cmd = ["qemu-system-x86_64", "-m", "512", "-display", "none", "-vga", "std", "-no-reboot", "-nodefaults"]
+    cmd += ["-serial", "stdio"]
     if uefi:
         vars_ = tmp_path / "vars.fd"
         shutil.copyfile(OVMF_VARS, vars_)
@@ -197,19 +214,40 @@ def boot(img: Path, tmp_path: Path, uefi: bool) -> str:
             "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
             "-drive", f"if=pflash,format=raw,file={vars_}",
         ]  # fmt: skip
-    cmd += ["-drive", f"file={disk},format=raw,if=virtio"]
-    result = subprocess.run(cmd, capture_output=True, timeout=600)
-    return result.stdout.decode(errors="replace")
+    cmd += ["-drive", f"file={stick},format=raw,if=none,id=stick", "-device", "virtio-blk-pci,drive=stick,bootindex=0"]
+    if target:
+        cmd += [
+            "-drive", f"file={target},format=raw,if=none,id=target",
+            "-device", "virtio-blk-pci,drive=target,bootindex=1",
+        ]  # fmt: skip
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    out = b""
+    deadline = time.monotonic() + seconds
+    try:
+        while time.monotonic() < deadline and until.encode() not in out:
+            ready, _, _ = select.select([proc.stdout], [], [], 1)
+            if ready:
+                chunk = os.read(proc.stdout.fileno(), 65536)
+                if not chunk:
+                    break
+                out += chunk
+    finally:
+        proc.kill()
+        proc.wait()
+    return out.decode(errors="replace")
 
 
 @needs_image_tools
 @needs_qemu
 @pytest.mark.parametrize("uefi", [False, True], ids=["bios", "uefi"])
-def test_boots_to_installer(built, tmp_path, uefi):
+def test_fresh_machine_shows_snap_menu_and_installs(built, tmp_path, uefi):
     img, _ = built
-    out = boot(img, tmp_path, uefi)
-    assert f"STANDIN-MENU platform={'efi' if uefi else 'pc'}" in out
-    assert "STANDIN-INSTALLER-STARTED" in out
+    out = boot(img, tmp_path, uefi, until="SNAP: starting the unattended Proxmox VE install.")
+    assert "Install Proxmox VE and build my lab" in out
+    assert "Progress:  [ ] 1 Install   [ ] 2 Host   [ ] 3 Network+VMs   [ ] 4 Finish" in out
+    assert "Advanced options" in out
+    assert "Install Proxmox VE (Graphical)" not in out
+    assert "SNAP: starting the unattended Proxmox VE install." in out
 
 
 needs_lvm = pytest.mark.skipif(
@@ -220,7 +258,7 @@ needs_lvm = pytest.mark.skipif(
 
 @pytest.fixture
 def installed_disk(tmp_path):
-    """A disk laid out like an ext4 Proxmox VE install: VG pve, LV root, /boot/pve/vmlinuz."""
+    """A disk laid out like an ext4 Proxmox VE install after stage 1: VG pve, LV root, kernel, snap.done."""
     disk = tmp_path / "target.img"
     disk.write_bytes(b"")
     os.truncate(disk, 96 * image.MIB)
@@ -239,6 +277,8 @@ def installed_disk(tmp_path):
             ["mount", "/dev/pve/root", str(mnt)],
             ["mkdir", "-p", f"{mnt}/boot/pve"],
             ["sh", "-c", f"echo not-a-kernel > {mnt}/boot/pve/vmlinuz"],
+            ["mkdir", "-p", f"{mnt}/var/lib/snap/progress"],
+            ["touch", f"{mnt}/var/lib/snap/progress/snap.done"],
             ["umount", str(mnt)],
             ["vgchange", "-q", "-an", "pve"],
         ):
@@ -255,32 +295,42 @@ def installed_disk(tmp_path):
 @needs_qemu
 @needs_lvm
 @pytest.mark.parametrize("uefi", [False, True], ids=["bios", "uefi"])
-def test_existing_install_is_booted_not_reinstalled(built, installed_disk, tmp_path, uefi):
+def test_existing_install_is_continued_not_reinstalled(built, installed_disk, tmp_path, uefi):
     img, _ = built
-    stick = tmp_path / "stick.img"
-    shutil.copyfile(img, stick)
-    cmd = ["qemu-system-x86_64", "-m", "512", "-nographic", "-no-reboot", "-nodefaults", "-serial", "stdio"]
-    if uefi:
-        vars_ = tmp_path / "vars.fd"
-        shutil.copyfile(OVMF_VARS, vars_)
-        cmd += [
-            "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
-            "-drive", f"if=pflash,format=raw,file={vars_}",
-        ]  # fmt: skip
-    cmd += [
-        "-drive", f"file={stick},format=raw,if=none,id=stick",
-        "-device", "virtio-blk-pci,drive=stick,bootindex=0",
-        "-drive", f"file={installed_disk},format=raw,if=none,id=target",
-        "-device", "virtio-blk-pci,drive=target,bootindex=1",
-    ]  # fmt: skip
-    # The fake kernel cannot boot, so GRUB stops at an error; collect what it printed.
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    try:
-        out, _ = proc.communicate(timeout=180)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        out, _ = proc.communicate()
-    text = out.decode(errors="replace")
-    assert "SNAP: Proxmox VE is already installed" in text
-    assert "Starting the installed Proxmox VE" in text
-    assert "STANDIN-INSTALLER-STARTED" not in text
+    out = boot(img, tmp_path, uefi, until="SNAP: starting the installed Proxmox VE.", target=installed_disk)
+    assert "Continue setting up my lab" in out
+    assert "Progress:  [x] 1 Install   [ ] 2 Host   [ ] 3 Network+VMs   [ ] 4 Finish" in out
+    assert "SNAP: starting the installed Proxmox VE." in out
+    assert "SNAP: starting the unattended Proxmox VE install." not in out
+
+
+# --- menu ------------------------------------------------------------------
+
+
+def test_menu_takes_install_lines_from_proxmox():
+    linux, initrd = menu.auto_install_entry(STANDIN_GRUB_CFG)
+    assert linux == "/boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent proxmox-start-auto-installer"
+    assert initrd == "/boot/initrd.img"
+    rendered = menu.render(STANDIN_GRUB_CFG)
+    assert "@PVE_" not in rendered
+    assert f"linux {linux}" in rendered
+
+
+def test_menu_refuses_proxmox_without_automated_entry():
+    graphical_only = STANDIN_GRUB_CFG.replace("(Automated)", "(Something else)")
+    with pytest.raises(menu.MenuError, match="not supported"):
+        menu.render(graphical_only)
+
+
+def test_menu_refuses_automated_entry_without_auto_flag():
+    broken = STANDIN_GRUB_CFG.replace(" proxmox-start-auto-installer", "")
+    with pytest.raises(menu.MenuError):
+        menu.render(broken)
+
+
+@pytest.mark.skipif(shutil.which("grub-script-check") is None, reason="grub-script-check not installed")
+def test_menu_is_valid_grub_script(tmp_path):
+    cfg = tmp_path / "grub.cfg"
+    cfg.write_text(menu.render(STANDIN_GRUB_CFG))
+    result = subprocess.run(["grub-script-check", str(cfg)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr or result.stdout
