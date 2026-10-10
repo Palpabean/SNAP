@@ -149,18 +149,21 @@ Passwords are stored only as hashes. Real configs containing any secret are neve
 7. Handoff (section 7.5).
 
 ### 7.2 CRACKLE (stage 2, on the host)
-CRACKLE uses only Proxmox's own tools (`pvesh`, `pvesm`, `qm`), so nothing extra is installed on the host, online or offline. The engine runs it from `/var/lib/snap` (section 9); each step checks the machine first and acts only when needed, so it is safe to repeat.
+CRACKLE sets up the host with Proxmox's own tools (`pvesh`, `pvesm`, `qm`, `pveum`) and installs the automation tools POP uses (D7), all offline from the stick. The engine runs it from `/var/lib/snap` (section 9); each step checks the machine first and acts only when needed, so it is safe to repeat.
 
 1. Wait for the Proxmox API to answer (up to 5 minutes).
 2. Package sources: add the free `pve-no-subscription` repository and disable the subscription-only enterprise repositories (PVE and Ceph). Offline this changes nothing until the host gets a network.
 3. Create the internal lab bridge `vmbr1`: VLAN-aware, no physical port, so lab traffic only leaves through the router (POP). The uplink bridge `vmbr0` from the installer and the management connection are left alone.
 4. Storage: enable `snippets` (cloud-init) and `import` content on `local`, keeping Proxmox's defaults; VM disks go to `local-lvm`.
 5. Turn the Ubuntu 24.04 cloud image shipped on the stick (pinned in `checksums.lock`) into template VM 9000, `snap-ubuntu-2404`: cloud-init drive, serial console, guest agent, on `vmbr1`. A half-made VM from an interrupted attempt is replaced; a VM 9000 that is not SNAP's stops the stage instead.
-6. Verify: every step's check holds again, then write `progress/crackle.done`.
+6. Install OpenTofu (`/usr/local/bin/tofu`) and the `bpg/proxmox` provider as a local filesystem mirror, with `/root/.tofurc` pointing at it, so `tofu init` works offline.
+7. Install Ansible (`ansible-core`, `python3-httpx`) with apt pointed only at the Debian packages on the stick; the host's own package sources are not touched and newer installed versions are kept.
+8. Install the Ansible collections (`oxlorg.opnsense` and its dependencies) offline into `/usr/share/ansible/collections`.
+9. Create the role `SnapAutomation` (only what OpenTofu needs to clone and manage VMs), the user `snap@pve` holding it, and the API token `snap@pve!tofu`; the secret is kept root-only in `/var/lib/snap/secrets/` and checked against the API. A lost secret gets a new token.
+10. Verify: every step's check holds again, then write `progress/crackle.done`.
 
 Changes from the original plan, to stay lightweight:
-- **No automation API token yet.** The engine runs as root on the host and calls Proxmox's tools directly; a token comes when something off the host needs the API.
-- **No automation tools installed.** Whether POP needs Ansible or OpenTofu at all, or can also use Proxmox's tools plus OPNsense's API directly, is decided in M3.
+- **Automation tools (D7):** CRACKLE also installs OpenTofu with the `bpg/proxmox` provider and Ansible with its collections, offline from the stick, and creates the least-privilege API user and token OpenTofu uses. POP then provisions with OpenTofu and configures with Ansible, and the user keeps both for later changes.
 - **The OPNsense template moves to M3**, together with its importer spike (D2).
 
 ### 7.3 POP (stage 3, on the host)
@@ -267,6 +270,7 @@ The code lives in one Python package, `snaplab`, so the parts can import each ot
 | D4 | **Terraform licensing** | **OpenTofu only.** It is MPL-2.0, so it can be redistributed on the USB, and it uses the same `bpg/proxmox` provider. Terraform is not shipped or tested. |
 | D5 | **Repository name** | **`snaplab`.** The project and stage names stay SNAP, CRACKLE, POP and BANG; the command stays `snap`. |
 | D6 | **Remote-access name** | **ECHO** (`snap echo`). |
+| D7 | **Provisioning and configuration tools** | **Both, run on the Proxmox host** (decided by the project owner). **OpenTofu** with `bpg/proxmox` creates and scales the lab's VMs and networks from `snap.yaml`, so changing the lab later means editing the file and re-applying. **Ansible** configures and manages what runs inside the VMs and the OPNsense router (through its API, `oxlorg.opnsense`). cloud-init in the Ubuntu template only bootstraps each VM (user, SSH key, network) so Ansible can reach it. Both tools are installed offline from the stick: OpenTofu and the provider as pinned release archives (filesystem mirror), Ansible from Debian packages served to apt as a local repository, collections as pinned Galaxy archives. The OpenTofu API token is kept after BANG, root-only, for later changes. Open for M3: how the host reaches the lab VMs, which sit on the internal bridge (proposed: a small admin network on `vmbr1` that OPNsense allows SSH and API from). |
 
 ### Remaining risks
 - The D1 spike may fail on some firmware; the hardware compatibility list records the results.

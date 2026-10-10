@@ -1,4 +1,7 @@
 import json
+import os
+import stat
+import zipfile
 
 import pytest
 from fake_proxmox import FakeProxmox
@@ -6,14 +9,51 @@ from fake_proxmox import FakeProxmox
 from snaplab import hostcli
 from snaplab.core.engine import PROGRESS_DIR, Context, Engine
 from snaplab.stages.crackle import stage as crackle
+from snaplab.stages.crackle import tools
 
 IMAGE = f"/var/lib/snap/{crackle.UBUNTU_IMAGE}"
+
+
+COLLECTIONS = [
+    ("oxlorg.opnsense", "26.1.11"),
+    ("community.general", "13.5.0"),
+    ("community.library_inventory_filtering_v1", "1.1.5"),
+]
+
+
+def stock_payload(host):
+    """What the stick brings: the image, tool archives, Debian packages and tools.json."""
+    host.write(IMAGE, "fake qcow2")
+    payload = host.path("/var/lib/snap")
+    (payload / "tools").mkdir(parents=True)
+    with zipfile.ZipFile(payload / "tools/opentofu.zip", "w") as z:
+        z.writestr("tofu", "#!/bin/sh\n")
+        z.writestr("LICENSE", "MPL-2.0\n")
+    with zipfile.ZipFile(payload / "tools/provider-proxmox.zip", "w") as z:
+        z.writestr("terraform-provider-proxmox_v0.116.0", "binary")
+    host.write("/var/lib/snap/debs/Packages", "Package: ansible-core\n")
+    collections = []
+    for name, version in COLLECTIONS:
+        file = f"collections/{name.replace('.', '-')}-{version}.tar.gz"
+        host.write(f"/var/lib/snap/{file}", "tar")
+        collections.append({"name": name, "version": version, "file": file})
+    tools_json = {
+        "opentofu": {"version": "1.13.1", "file": "tools/opentofu.zip"},
+        "provider_proxmox": {
+            "source": "registry.opentofu.org/bpg/proxmox",
+            "version": "0.116.0",
+            "file": "tools/provider-proxmox.zip",
+        },
+        "ansible_collections": collections,
+        "debian_packages": {"install": ["ansible-core", "python3-httpx"], "versions": {}},
+    }
+    host.write("/var/lib/snap/tools.json", json.dumps(tools_json))
 
 
 @pytest.fixture
 def pve(tmp_path):
     host = FakeProxmox(tmp_path)
-    host.write(IMAGE, "fake qcow2")
+    stock_payload(host)
     return host
 
 
@@ -142,3 +182,45 @@ def test_status_and_cli(pve, capsys, monkeypatch):
     assert "  - Create the Ubuntu 24.04 VM template: done" in capsys.readouterr().out
     assert hostcli.main(["logs"], host=pve) == 0
     assert "CRACKLE (host setup) done" in capsys.readouterr().out
+
+
+def test_automation_tools_are_installed_offline(pve):
+    assert engine(pve).resume()
+    # OpenTofu, with the provider as a local mirror and a config that uses it.
+    assert pve.exists(tools.TOFU) and os.access(pve.path(tools.TOFU), os.X_OK)
+    mirror = "/usr/local/share/snap/tofu-providers/registry.opentofu.org/bpg/proxmox/0.116.0/linux_amd64"
+    assert pve.exists(f"{mirror}/terraform-provider-proxmox_v0.116.0")
+    rc = pve.read(tools.TOFU_CONFIG)
+    assert 'include = ["registry.opentofu.org/bpg/proxmox"]' in rc and "filesystem_mirror" in rc
+    # Ansible from the stick's packages only, then the collections.
+    assert pve.debs == {"ansible-core", "python3-httpx"}
+    assert "file:/var/lib/snap/debs ./" in pve.read("/var/lib/snap/debs/snap-local.list")
+    assert pve.collections == dict(COLLECTIONS)
+
+
+def test_api_token_is_least_privilege_and_kept_secret(pve):
+    assert engine(pve).resume()
+    privileges = pve.roles[tools.API_ROLE].split(",")
+    assert "VM.Clone" in privileges and not any(p.startswith(("Sys.Modify", "Permissions")) for p in privileges)
+    assert ("/", tools.API_USER, tools.API_ROLE) in pve.acls
+    secret = pve.read(tools.API_SECRET).strip()
+    assert secret == f"snap@pve!tofu={pve.tokens['snap@pve!tofu']}"
+    assert stat.S_IMODE(pve.path(tools.API_SECRET).stat().st_mode) == 0o600
+    assert stat.S_IMODE(pve.path("/var/lib/snap/secrets").stat().st_mode) == 0o700
+
+
+def test_lost_token_secret_is_replaced(pve):
+    assert engine(pve).resume()
+    old = pve.tokens["snap@pve!tofu"]
+    pve.path(tools.API_SECRET).unlink()
+    pve.path(f"{PROGRESS_DIR}/crackle.done").unlink()
+    assert engine(pve).resume()
+    assert pve.tokens["snap@pve!tofu"] != old
+    assert pve.read(tools.API_SECRET).strip().endswith(pve.tokens["snap@pve!tofu"])
+
+
+def test_missing_tool_archives_fail_preflight(pve):
+    pve.path("/var/lib/snap/tools/opentofu.zip").unlink()
+    assert not engine(pve).resume()
+    state = json.loads(pve.read("/var/lib/snap/state.json"))
+    assert "tools/opentofu.zip is missing" in state["stages"]["crackle"]["error"]

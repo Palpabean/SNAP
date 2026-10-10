@@ -12,6 +12,7 @@ import re
 import time
 
 from snaplab.core.engine import Context, Stage, Step
+from snaplab.stages.crackle import tools
 
 LAB_BRIDGE = "vmbr1"
 VM_STORAGE = "local-lvm"
@@ -207,7 +208,7 @@ def preflight(ctx: Context) -> list[str]:
             problems.append(f"{tool} is not available; is this a Proxmox VE host?")
     if not ctx.host.exists(f"{ctx.payload}/{UBUNTU_IMAGE}"):
         problems.append(f"the Ubuntu image is missing from {ctx.payload}/images; rebuild the USB stick")
-    return problems
+    return problems + tools.preflight(ctx)
 
 
 STAGE = Stage(
@@ -220,5 +221,6 @@ STAGE = Stage(
         Step("lab-bridge", f"Create the internal lab bridge {LAB_BRIDGE}", bridge_done, make_bridge),
         Step("storage", "Enable snippets and imports on local storage", storage_done, set_storage),
         Step("ubuntu-template", "Create the Ubuntu 24.04 VM template", template_done, make_template),
+        *tools.STEPS,
     ],
 )

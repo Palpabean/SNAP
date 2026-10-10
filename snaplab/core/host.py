@@ -8,7 +8,10 @@ python3 but none of the builder's packages.
 from __future__ import annotations
 
 import os
+import ssl
 import subprocess
+import urllib.request
+import zipfile
 from pathlib import Path
 
 
@@ -61,6 +64,36 @@ class Host:
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("a") as f:
             f.write(text)
+
+    def mkdir(self, path: str | Path, mode: int = 0o755) -> None:
+        target = self.path(path)
+        target.mkdir(parents=True, exist_ok=True)
+        target.chmod(mode)
+
+    def unzip(
+        self, archive: str | Path, dest: str | Path, members: list[str] | None = None, mode: int = 0o755
+    ) -> list[str]:
+        """Extract a zip archive (or only `members`) into dest; return the extracted names."""
+        target = self.path(dest)
+        target.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(self.path(archive)) as z:
+            names = [n for n in z.namelist() if not n.endswith("/") and (members is None or n in members)]
+            missing = set(members or []) - set(names)
+            if missing:
+                raise RuntimeError(f"{archive} has no {', '.join(sorted(missing))}")
+            z.extractall(target, members=names)
+        for name in names:
+            (target / name).chmod(mode)
+        return names
+
+    def http_ok(self, url: str, headers: dict[str, str]) -> bool:
+        """True if a GET succeeds. Certificates are not checked: only for this host's own API."""
+        context = ssl._create_unverified_context()
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), context=context, timeout=15):
+                return True
+        except OSError:
+            return False
 
     def glob(self, pattern: str) -> list[str]:
         return sorted("/" + str(p.relative_to(self.root)) for p in self.root.glob(pattern.lstrip("/")))

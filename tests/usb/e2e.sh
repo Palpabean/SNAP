@@ -89,4 +89,10 @@ grep -aq "SNAP: starting the installed Proxmox VE." "$WORK/pass2.log" || {
 }
 [ "$result" = finished ] || { echo "e2e: CRACKLE did not finish ($result)" >&2; exit 1; }
 sudo test -e "$WORK/mnt/var/lib/snap/progress/crackle.done"
+# The automation tools CRACKLE installs (design decision D7).
+sudo test -x "$WORK/mnt/usr/local/bin/tofu"
+sudo grep -q 'filesystem_mirror' "$WORK/mnt/root/.tofurc"
+sudo grep -A1 -E '^Package: (ansible-core|python3-httpx)$' "$WORK/mnt/var/lib/dpkg/status" | grep -c 'install ok installed' | grep -qx 2
+sudo test -d "$WORK/mnt/usr/share/ansible/collections/ansible_collections/oxlorg/opnsense"
+sudo test -s "$WORK/mnt/var/lib/snap/secrets/proxmox-api-token"
 echo "e2e: OK ($FIRMWARE): installed unattended, stick booted the install, handoff and CRACKLE complete"

@@ -9,7 +9,7 @@ SNAP (Swift Network Automation Program) turns a bare computer into a self-contai
 | 3 | **POP** | Build the router, firewall, virtual networks and test VMs |
 | 4 | **BANG** | Final checks, secret cleanup, and "your lab is ready" |
 
-**Status:** proof of concept, milestone M2. The USB stick installs Proxmox VE unattended from a hand-written `snap.yaml`, hands off to the installed system, and runs CRACKLE: package sources, the internal lab bridge, storage, and an Ubuntu 24.04 VM template. POP (router, networks, test VMs), BANG, and the guided wizard come next. On the host, `snap status` shows progress and `snap logs` the engine log.
+**Status:** proof of concept, milestone M2. The USB stick installs Proxmox VE unattended from a hand-written `snap.yaml`, hands off to the installed system, and runs CRACKLE: package sources, the internal lab bridge, storage, an Ubuntu 24.04 VM template, and the automation tools (OpenTofu with the Proxmox provider, Ansible with its collections, and a least-privilege API token), all offline. POP (router, networks, test VMs), BANG, and the guided wizard come next. On the host, `snap status` shows progress and `snap logs` the engine log.
 
 ## Build a stick
 
