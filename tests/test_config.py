@@ -91,6 +91,7 @@ def test_root_username_is_rejected(cfg):
 def test_static_gateway_outside_subnet(cfg):
     cfg["host"]["management"] = {
         "mode": "static",
+        "mac": "00:11:22:33:44:55",
         "address": "192.168.1.10/24",
         "gateway": "192.168.2.1",
         "dns": ["192.168.1.1"],

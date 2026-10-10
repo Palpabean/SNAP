@@ -1,0 +1,12 @@
+# Pinned third-party artifacts (Design 0001, section 5.1 and decision D3).
+# The builder refuses any download whose SHA-256 differs from the value here.
+# Values come from Proxmox's official SHA256SUMS list.
+
+[proxmox-ve]
+version = "9.2-1"
+url = "https://enterprise.proxmox.com/iso/proxmox-ve_9.2-1.iso"
+sha256 = "4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c"
+
+# Must match the ISO's release series; mismatches cause answer-file errors.
+[proxmox-auto-install-assistant]
+version = "9.2.8"

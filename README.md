@@ -9,7 +9,23 @@ SNAP (Swift Network Automation Program) turns a bare computer into a self-contai
 | 3 | **POP** | Build the router, firewall, virtual networks and test VMs |
 | 4 | **BANG** | Final checks, secret cleanup, and "your lab is ready" |
 
-**Status:** proof of concept, milestone M0. Nothing installs anything yet. What exists is the `snap.yaml` schema and its validator.
+**Status:** proof of concept, milestone M1. The builder makes a USB stick that installs Proxmox VE unattended from a hand-written `snap.yaml` and hands off to the installed system. The guided-setup wizard and stages 2 to 4 come next.
+
+## Build a stick
+
+You need Linux (or WSL) with podman or docker, and a USB stick of 2 GB or more.
+
+1. Copy `examples/snap.example.yaml` to `my-snap.yaml` and fill it in. Find the target disk's serial with `lsblk -o NAME,SERIAL,MODEL,SIZE` from any Linux live system; **the installer erases the disk with that serial**.
+2. Build the image (the first build downloads the 1.7 GB Proxmox ISO and checks it against `checksums.lock`):
+
+   ```sh
+   podman build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
+   podman run --rm -v "$PWD:/work" snaplab-builder build my-snap.yaml -o snap.img
+   ```
+
+3. Write `snap.img` to the stick with `dd`, balenaEtcher, or Rufus (DD mode). Boot the target computer from it, with Secure Boot on or off.
+
+The stick installs Proxmox, restarts, boots the new system, copies what it needs, and shows *Handoff complete: you can remove the USB now.* If it is left in, it boots the installed system instead of reinstalling.
 
 - Design: [docs/design/0001-architecture.md](docs/design/0001-architecture.md)
 - Example config: [examples/snap.example.yaml](examples/snap.example.yaml)

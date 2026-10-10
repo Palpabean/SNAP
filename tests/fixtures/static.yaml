@@ -1,0 +1,33 @@
+# Variant of the example with a static management address, a disk chosen by
+# model. CI renders it and checks it with the Proxmox assistant.
+version: 1
+host:
+  hostname: lab01
+  domain: example.org
+  country: de
+  timezone: Europe/Berlin
+  keyboard: de
+  management:
+    mode: static
+    mac: "00:11:22:aa:bb:cc"
+    address: 192.168.1.10/24
+    gateway: 192.168.1.1
+    dns: [192.168.1.1, 9.9.9.9]
+  root_password_hash: "$6$snaplabexample$K8fOhYIdiN4TrzjDWb9vWtbwjteI61qlgsMRvCaVcn5ZcVnPebJ1WDj2zYo82ktRIKEBOl6rKjYROnq18Unxh/"
+  email: admin@example.org
+  storage:
+    filesystem: ext4
+  target_disk:
+    model: Samsung_SSD_870_EVO_1TB
+networks:
+  - name: lab
+    cidr: 10.0.0.0/24
+    router: 10.0.0.1
+    policy: isolated
+machines:
+  count: 0
+  name_prefix: vm
+  image: ubuntu-24.04
+  network: lab
+  username: labuser
+  ssh_keys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample user@laptop"]

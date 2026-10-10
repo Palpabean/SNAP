@@ -91,10 +91,21 @@ USER'S COMPUTER                                    TARGET COMPUTER
 - The project never hosts or redistributes the Proxmox, Ubuntu, or OPNsense images.
 
 ### 5.2 The USB
-- A bootloader menu with: Boot through USB: guided setup (default), Proxmox auto-install, advanced command line, memory test, and boot from internal disk.
-- A small FAT partition labeled `PROXMOX-AIS`, where the wizard writes the rendered `answer.toml`. The Proxmox installer looks for this label when the ISO is prepared with `--fetch-from partition`; the label is fixed by the installer, not by us.
-- A data partition labeled `SNAPDATA` for `snap.yaml`, the payload, and `checksums.lock`.
-- The prepared Proxmox ISO, booted from our own GRUB menu. How it is booted is the M1 spike (see decision D1 in section 13).
+The stick is the Proxmox installer's own hybrid ISO, written from the first sector exactly as Proxmox intends, with two partitions appended after it:
+
+```
+| Proxmox ISO (prepared, answer file inside, SNAP boot menu) | SNAPDATA (ext4) |
+```
+
+- **The ISO** is prepared with Proxmox's `proxmox-auto-install-assistant` (answer file from a partition, first-boot script baked in). The builder then **replaces Proxmox's boot menu with the SNAP menu**, so the user only ever sees SNAP's. The change is appended as a new ISO session, so Proxmox's boot code, partition tables, El Torito records and volume UUID stay byte for byte as Proxmox made them: BIOS, UEFI and Secure Boot work as on a plain Proxmox stick. The SNAP menu starts the installer with the exact `linux` and `initrd` lines of Proxmox's "Install Proxmox VE (Automated)" entry, copied at build time; if a Proxmox release drops that entry, the build stops.
+- **The SNAP menu** (`grub-snap.cfg`, themed with `theme/theme.txt` and the font on the ISO, plain text on a serial console) is visible, with a countdown bar, and shows setup progress read from the machine: `[x]` for each stage whose marker exists under `/var/lib/snap/progress/` (`snap.done`, `crackle.done`, `pop.done`, `bang.done`) on the installed system. It looks for an installed Proxmox VE the way Proxmox's Rescue Boot does (`(lvm/pve-root)/boot/pve/vmlinuz`):
+  - not installed: **Install Proxmox VE and build my lab** (starts after 10 seconds);
+  - installed: **Continue setting up my lab**, or **Start my lab** once BANG is done (starts after 5 seconds);
+  - **Advanced options**: reinstall (only when installed, behind a second "Yes, erase the target disk" choice), start from the computer's own disk, memory test, firmware settings.
+- **The answer file is inside the ISO** (`--fetch-from iso`). An answer partition on the same stick does not work: the installer mounts the whole stick as its ISO, and Linux then refuses to mount one of its partitions (found by the CI install test: "Can't open blockdev"). The guided wizard will therefore need another way to hand its answers to the installer, for example serving them over HTTP from the live environment (`--fetch-from http`); this is open.
+- **`SNAPDATA`** holds `payload.sha256` (a `sha256sum` manifest of every other file), `snap.yaml`, `bin/snap` (the engine entry point), and the rest of the payload.
+- The builder works on a regular file (xorriso, mkfs.ext4, sfdisk): no root, no loop devices. It runs in the container from `snaplab/delivery/usb/Containerfile`.
+- The guided-setup wizard (section 5.3) will be added to this stick later. Until then the stick runs headless from a hand-written `snap.yaml`, where the target disk's serial in `snap.yaml` is the safety check: the installer only touches a disk with that serial.
 
 ### 5.3 The live environment and TUI
 - A small Debian-based environment that boots straight into a terminal wizard written in Python with the Textual library. It works over a VM console, serial console, or remote console, needs no graphics stack, and can be driven by scripted keystrokes in tests.
@@ -133,7 +144,7 @@ Passwords are stored only as hashes. Real configs containing any secret are neve
 2. Validate `snap.yaml` against the schema.
 3. Show the typed disk confirmation.
 4. Render the Proxmox answer file (`answer.toml`) from `snap.yaml`. The target disk is selected by serial with a `disk-setup` filter, and the root password is written only as a hash. Validate it with `proxmox-auto-install-assistant validate-answer`.
-5. Write it to the `PROXMOX-AIS` partition, set the next boot to the Proxmox auto-install, and reboot.
+5. Hand it to the installer (inside the ISO for headless builds; see section 5.2 for the wizard), and start the Proxmox auto-install.
 6. The installer runs unattended and restarts.
 7. Handoff (section 7.5).
 
@@ -245,7 +256,7 @@ The code lives in one Python package, `snaplab`, so the parts can import each ot
 
 | # | Question | Decision |
 | :--- | :--- | :--- |
-| D1 | **USB boot chain** | Still the largest risk, but narrowed. The answer file does not need to be inside the ISO: with `--fetch-from partition`, the ISO prepared by Proxmox's own assistant reads `answer.toml` from a partition labeled `PROXMOX-AIS`, so the wizard can write it at run time. The M1 spike tests, in order: **(a)** our GRUB menu loopback-boots the prepared ISO with no extra kernel arguments (Ventoy-style injected arguments are known to leak into the installed system, so we do not inject any); **(b)** the ISO contents extracted to their own partition. **Fallback:** run the wizard in the Builder and write the stick as the prepared ISO plus the `PROXMOX-AIS` and `SNAPDATA` partitions, with the hardware check moved to the first-boot script. Test on both UEFI and legacy BIOS. |
+| D1 | **USB boot chain** | **One stick holds everything** (decided by the project owner), built as described in section 5.2: Proxmox's own hybrid ISO with the answer file inside and an appended `SNAPDATA` partition, with the SNAP menu replacing Proxmox's (the only menu the user sees), which shows progress and boots an existing install instead of reinstalling. This avoids a custom bootloader and keeps Proxmox's tested boot path, including Secure Boot. CI builds the stick from the real ISO and runs the full install and handoff in QEMU on both BIOS and UEFI; real hardware still has to confirm it. The install-detection check reads ext4 only, so `storage.filesystem` is limited to ext4 for now. |
 | D2 | **OPNsense automation** | Bootstrap `config.xml` delivered on an attached ISO through the OPNsense importer; it holds interface assignment and API access. Everything else goes through the API with `oxlorg.opnsense`. Still needs an early spike in M3 to confirm the importer runs unattended on first boot. |
 | D3 | **Version-specific behavior** | Pin Proxmox VE 9.x (the latest point release at M1) together with the matching `proxmox-auto-install-assistant`. Use the installer's first-boot hook for the handoff (section 7.5). Pin OPNsense to the version `oxlorg.opnsense` supports. All three versions live in `checksums.lock`, and CI validates the answer file with the pinned assistant. |
 | D4 | **Terraform licensing** | **OpenTofu only.** It is MPL-2.0, so it can be redistributed on the USB, and it uses the same `bpg/proxmox` provider. Terraform is not shipped or tested. |

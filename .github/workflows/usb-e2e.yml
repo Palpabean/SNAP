@@ -1,0 +1,58 @@
+name: USB end-to-end
+
+# Build a stick from the real, pinned Proxmox ISO and run stage 1 for real in
+# QEMU with KVM: unattended install, restart, stick boots the install, handoff.
+on:
+  push:
+    paths:
+      - "snaplab/**"
+      - "examples/**"
+      - "checksums.lock"
+      - "tests/usb/**"
+      - ".github/workflows/usb-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        firmware: [bios, uefi]
+    env:
+      WORK: ${{ github.workspace }}/e2e-work
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - name: Install QEMU and LVM
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 ovmf lvm2
+      - uses: actions/cache@v4
+        with:
+          path: .snaplab-cache
+          key: snaplab-cache-${{ hashFiles('checksums.lock') }}
+      - name: Build the builder container
+        run: docker build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
+      - name: Build the USB image
+        run: |
+          docker run --rm -v "$PWD:/work" snaplab-builder build examples/snap.example.yaml -o snap.img --serial-console
+          sudo chown -R "$(id -u)" .snaplab-cache snap.img snap.img.sha256
+      - name: Install, restart, hand off
+        run: tests/usb/e2e.sh snap.img ${{ matrix.firmware }}
+      - name: Keep the serial logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serial-logs-${{ matrix.firmware }}
+          path: e2e-work/*.log
+          if-no-files-found: ignore

@@ -21,5 +21,49 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
+      - run: shellcheck snaplab/stages/snap/*.sh snaplab/delivery/usb/*.sh tests/usb/*.sh
       - run: pytest -q
       - run: snaplab validate examples/snap.example.yaml
+
+  # Check the generated answer files with Proxmox's own tool (Design 0001, D3).
+  proxmox-answer:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install proxmox-auto-install-assistant (Proxmox VE 9)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl python3 python3-yaml python3-jsonschema
+          curl -fsSL https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg \
+            -o /usr/share/keyrings/proxmox-archive-keyring.gpg
+          printf '%s\n' 'Types: deb' 'URIs: http://download.proxmox.com/debian/pve' 'Suites: trixie' \
+            'Components: pve-no-subscription' 'Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg' \
+            > /etc/apt/sources.list.d/pve.sources
+          apt-get update
+          apt-get install -y --no-install-recommends proxmox-auto-install-assistant
+      - name: Render and validate answer files
+        run: |
+          for cfg in examples/snap.example.yaml tests/fixtures/static.yaml; do
+            python3 -m snaplab answer "$cfg" -o answer.toml
+            echo "== $cfg"; cat answer.toml
+            proxmox-auto-install-assistant validate-answer answer.toml
+          done
+
+  # Build USB images from a stand-in ISO and boot them in QEMU (BIOS and UEFI),
+  # including the "Proxmox is already installed" path, which needs LVM and sudo.
+  usb-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends xorriso grub-common grub-pc-bin grub-efi-amd64-bin \
+            mtools dosfstools e2fsprogs fdisk qemu-system-x86 ovmf lvm2
+      - run: pip install -e '.[dev]'
+      - run: pytest -v -rs tests/test_usb_build.py
+        env:
+          SNAPLAB_TEST_LVM: "1"
