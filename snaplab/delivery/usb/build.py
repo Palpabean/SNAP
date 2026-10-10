@@ -13,6 +13,7 @@ the container from snaplab/delivery/usb/Containerfile.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -20,6 +21,7 @@ import tempfile
 from importlib import resources
 from pathlib import Path
 
+import snaplab
 from snaplab.core import config
 from snaplab.delivery.usb import fetch, image, menu
 from snaplab.stages.snap import answer
@@ -103,13 +105,27 @@ def prepare(iso: Path, answer_toml: str, firstboot: bytes, assistant: str, cache
     return prepared
 
 
-def make_payload(config_path: Path, dest: Path) -> None:
-    """The SNAPDATA contents: snap.yaml, the engine, and a checksum manifest over both."""
+def make_payload(config_path: Path, cfg: dict, images: dict[str, Path], dest: Path) -> None:
+    """The SNAPDATA contents, copied to /var/lib/snap on the host at first boot.
+
+    snap.yaml (as written) and snap.json (validated, for the host, which has no
+    YAML library), the engine (lib/snaplab, bin/snap), the VM images, and a
+    checksum manifest over everything.
+    """
     (dest / "bin").mkdir(parents=True)
     shutil.copyfile(config_path, dest / "snap.yaml")
-    engine = dest / "bin" / "snap"
-    engine.write_bytes(_asset("snaplab.delivery.usb", "engine-placeholder.sh"))
-    engine.chmod(0o755)
+    (dest / "snap.json").write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n")
+    command = dest / "bin" / "snap"
+    command.write_bytes(_asset("snaplab.delivery.usb", "snap-host.sh"))
+    command.chmod(0o755)
+    package = Path(snaplab.__file__).parent
+    for src in package.rglob("*.py"):
+        target = dest / "lib" / "snaplab" / src.relative_to(package)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, target)
+    for name, src in images.items():
+        (dest / "images").mkdir(exist_ok=True)
+        shutil.copyfile(src, dest / "images" / name)
     files = sorted(p for p in dest.rglob("*") if p.is_file())
     manifest = "".join(f"{fetch.sha256(p)}  {p.relative_to(dest).as_posix()}\n" for p in files)
     (dest / "payload.sha256").write_text(manifest)
@@ -136,6 +152,8 @@ def build(
 
     pve = lock["proxmox-ve"]
     iso = fetch.fetch(pve["url"], pve["sha256"], cache, log=log)
+    ubuntu = lock["ubuntu-cloud-image"]
+    ubuntu_img = fetch.fetch(ubuntu["url"], ubuntu["sha256"], cache, log=log)
     firstboot = _asset("snaplab.stages.snap", "firstboot.sh")
 
     output = output.resolve()
@@ -146,7 +164,7 @@ def build(
         image.run([ASSISTANT, "validate-answer", str(work / "answer.toml")])
         prepared = prepare(iso, answer_toml, firstboot, installed, cache, log=log)
 
-        make_payload(config_path, work / "payload")
+        make_payload(config_path, cfg, {"ubuntu-24.04-server-cloudimg-amd64.img": ubuntu_img}, work / "payload")
         image.make_data(work / "payload", work / "data.img")
 
         log("assembling the USB image")

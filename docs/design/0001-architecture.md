@@ -149,15 +149,19 @@ Passwords are stored only as hashes. Real configs containing any secret are neve
 7. Handoff (section 7.5).
 
 ### 7.2 CRACKLE (stage 2, on the host)
-1. Wait for the Proxmox services and API to be ready.
-2. Configure package repositories (offline mirror from the bundle, or standard repositories if online).
-3. Create a least-privilege role and API token for automation.
-4. Install the automation tools from the offline bundle.
-5. Create the network bridges: an uplink bridge and an internal VLAN-aware bridge. The management connection is left alone.
-6. Ensure storage is ready for images and VM disks.
-7. Import the Ubuntu cloud image and convert it to a template.
-8. Import the OPNsense image and convert it to a template.
-9. Verify: the API responds and both templates exist.
+CRACKLE uses only Proxmox's own tools (`pvesh`, `pvesm`, `qm`), so nothing extra is installed on the host, online or offline. The engine runs it from `/var/lib/snap` (section 9); each step checks the machine first and acts only when needed, so it is safe to repeat.
+
+1. Wait for the Proxmox API to answer (up to 5 minutes).
+2. Package sources: add the free `pve-no-subscription` repository and disable the subscription-only enterprise repositories (PVE and Ceph). Offline this changes nothing until the host gets a network.
+3. Create the internal lab bridge `vmbr1`: VLAN-aware, no physical port, so lab traffic only leaves through the router (POP). The uplink bridge `vmbr0` from the installer and the management connection are left alone.
+4. Storage: enable `snippets` (cloud-init) and `import` content on `local`, keeping Proxmox's defaults; VM disks go to `local-lvm`.
+5. Turn the Ubuntu 24.04 cloud image shipped on the stick (pinned in `checksums.lock`) into template VM 9000, `snap-ubuntu-2404`: cloud-init drive, serial console, guest agent, on `vmbr1`. A half-made VM from an interrupted attempt is replaced; a VM 9000 that is not SNAP's stops the stage instead.
+6. Verify: every step's check holds again, then write `progress/crackle.done`.
+
+Changes from the original plan, to stay lightweight:
+- **No automation API token yet.** The engine runs as root on the host and calls Proxmox's tools directly; a token comes when something off the host needs the API.
+- **No automation tools installed.** Whether POP needs Ansible or OpenTofu at all, or can also use Proxmox's tools plus OPNsense's API directly, is decided in M3.
+- **The OPNsense template moves to M3**, together with its importer spike (D2).
 
 ### 7.3 POP (stage 3, on the host)
 1. Render the network model from `snap.yaml`: subnets, VLANs, DHCP, DNS, firewall rules.
@@ -200,12 +204,13 @@ ECHO (`snap echo`) is remote access with Tailscale. It is a separate command the
 
 ## 9. State, logging, and recovery
 
-- State lives in a file on the target (for example under `/var/lib/snap/`), recording each stage and step as `pending`, `running`, `done`, or `failed`. Logs are written alongside it.
+- State lives in `/var/lib/snap/state.json`, recording each stage and step as `pending`, `running`, `done`, or `failed` (with the error). The engine log is `/var/log/snap/engine.log`; the handoff log is `/var/log/snap/firstboot.log`. A finished stage also writes `/var/lib/snap/progress/<stage>.done`, which the USB boot menu reads to show progress.
+- The engine is plain Python using only the standard library, shipped on the stick in `lib/` with the validated config as `snap.json`, because the host has `python3` but none of the builder's packages.
 - After any restart, the engine resumes at the first unfinished step.
 - Recovery screens: stage failed (try again, save a report, start over), network change undone (automatic revert), and hardware check (fix before continuing).
 - Saved reports remove passwords and keys.
 - Because state, logs, and the engine live on the host, problems can be diagnosed from the host console or over SSH, with no USB required.
-- Planned host commands:
+- Host commands (`snap status`, `snap logs`, `snap resume` exist; `snap report` is planned):
   - `snap status`: stage and step results
   - `snap logs`: inspect log
   - `snap resume`: continue from the first unfinished step
@@ -274,7 +279,7 @@ The code lives in one Python package, `snaplab`, so the parts can import each ot
 
 - **M0:** repository, license, `snap.yaml` schema, test layers 1 and 2.
 - **M1:** the USB boot-chain spike (D1), then SNAP end to end: wizard, answer file, unattended install, handoff.
-- **M2:** CRACKLE with the Ubuntu template.
-- **M3:** the OPNsense importer spike (D2), then POP with OPNsense, networks, test VMs, and policy tests.
+- **M2:** the engine (`snap resume`, `snap status`, `snap logs`) and CRACKLE with the Ubuntu template.
+- **M3:** the OPNsense template and importer spike (D2), then POP with OPNsense, networks, test VMs, and policy tests.
 - **M4:** BANG, recovery screens, the Builder, and hardware testing.
 - **Later:** remote access, more delivery methods, Windows images, ZFS and mirrors.

@@ -12,6 +12,7 @@ import os
 import select
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -76,18 +77,50 @@ menuentry 'Install Proxmox VE (Graphical)' --class debian --class gnu-linux --cl
 # --- payload ---------------------------------------------------------------
 
 
-def test_payload_manifest_satisfies_firstboot(tmp_path):
+def make_test_payload(tmp_path):
+    from snaplab.core import config
+
+    image_file = tmp_path / "ubuntu.img"
+    image_file.write_bytes(b"fake cloud image")
     payload = tmp_path / "payload"
-    build.make_payload(EXAMPLE, payload)
+    cfg = config.load(EXAMPLE)
+    build.make_payload(EXAMPLE, cfg, {"ubuntu-24.04-server-cloudimg-amd64.img": image_file}, payload)
+    return payload, cfg
+
+
+def test_payload_manifest_satisfies_firstboot(tmp_path):
+    payload, cfg = make_test_payload(tmp_path)
     assert (payload / "snap.yaml").read_bytes() == EXAMPLE.read_bytes()
+    assert json.loads((payload / "snap.json").read_text()) == cfg
     assert os.access(payload / "bin" / "snap", os.X_OK)
     listed = [line.split("  ", 1)[1] for line in (payload / "payload.sha256").read_text().splitlines()]
-    assert listed == ["bin/snap", "snap.yaml"]
+    assert {"bin/snap", "snap.yaml", "snap.json", "lib/snaplab/hostcli.py"} <= set(listed)
+    assert "images/ubuntu-24.04-server-cloudimg-amd64.img" in listed
 
     env = {**os.environ, "SNAP_ROOT": str(tmp_path / "root"), "SNAP_SOURCE": str(payload)}
     result = subprocess.run(["bash", str(FIRSTBOOT)], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout
     assert (tmp_path / "root/var/lib/snap/snap.yaml").read_bytes() == EXAMPLE.read_bytes()
+
+
+def test_engine_on_the_stick_needs_only_the_standard_library(tmp_path):
+    """The host has python3 but none of the builder's packages (PyYAML, jsonschema)."""
+    payload, _ = make_test_payload(tmp_path)
+    env = {"PYTHONPATH": str(payload / "lib"), "PATH": os.environ["PATH"]}
+    # -S: no site-packages, so only the standard library and the shipped engine are importable.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            "import snaplab.hostcli, sys; print(sorted(set(sys.modules) & {'yaml', 'jsonschema'}))",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "[]"
 
 
 def test_layout_is_aligned():
@@ -125,10 +158,13 @@ def built(tmp_path_factory):
     stub = bindir / build.ASSISTANT
     stub.write_text(STUB_ASSISTANT)
     stub.chmod(0o755)
+    ubuntu = tmp / "mirror" / "ubuntu-24.04-server-cloudimg-amd64.img"
+    ubuntu.write_bytes(b"stand-in cloud image")
     lock = tmp / "checksums.lock"
     lock.write_text(
         f'[proxmox-ve]\nversion = "9.2-1"\nurl = "{iso.as_uri()}"\nsha256 = "{fetch.sha256(iso)}"\n'
         '[proxmox-auto-install-assistant]\nversion = "9.2.8"\n'
+        f'[ubuntu-cloud-image]\nversion = "test"\nurl = "{ubuntu.as_uri()}"\nsha256 = "{fetch.sha256(ubuntu)}"\n'
     )
 
     mp = pytest.MonkeyPatch()

@@ -10,3 +10,11 @@ sha256 = "4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c"
 # Must match the ISO's release series; mismatches cause answer-file errors.
 [proxmox-auto-install-assistant]
 version = "9.2.8"
+
+# Base of the lab machines' VM template (CRACKLE). From Ubuntu's SHA256SUMS
+# for this dated release; dated releases are removed after a while, so bump
+# this when the download disappears.
+[ubuntu-cloud-image]
+version = "24.04 (release-20260926)"
+url = "https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-amd64.img"
+sha256 = "6a81c37564db9b1ee84e141922625e1d7c5b389b99bb3c572e0243607d5bb4d2"
