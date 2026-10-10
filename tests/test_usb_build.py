@@ -25,7 +25,7 @@ FIRSTBOOT = ROOT / "snaplab" / "stages" / "snap" / "firstboot.sh"
 OVMF_CODE = Path("/usr/share/OVMF/OVMF_CODE_4M.fd")
 OVMF_VARS = Path("/usr/share/OVMF/OVMF_VARS_4M.fd")
 
-IMAGE_TOOLS = ["xorriso", "grub-mkrescue", "mkfs.vfat", "mcopy", "mtype", "mkfs.ext4", "debugfs", "sfdisk"]
+IMAGE_TOOLS = ["xorriso", "grub-mkrescue", "mkfs.ext4", "debugfs", "sfdisk"]
 needs_image_tools = pytest.mark.skipif(
     any(shutil.which(t) is None for t in IMAGE_TOOLS), reason="disk-image tools not installed"
 )
@@ -39,11 +39,17 @@ case "$1" in
     --version) echo "proxmox-auto-install-assistant 9.2.8" ;;
     validate-answer) test -s "$2" ;;
     prepare-iso)
+        # Copies the ISO unchanged; keeps the answer file it was given next to the cache for tests.
         iso="$2"; shift 2
         while [ $# -gt 0 ]; do
-            case "$1" in --output) out="$2"; shift ;; esac
+            case "$1" in
+                --output) out="$2"; shift ;;
+                --answer-file) answer="$2"; shift ;;
+                --fetch-from) test "$2" = iso || exit 3; shift ;;
+            esac
             shift
         done
+        cp "$answer" "$(dirname "$out")/../last-answer.toml"
         cp "$iso" "$out" ;;
     *) exit 2 ;;
 esac
@@ -86,10 +92,8 @@ def test_payload_manifest_satisfies_firstboot(tmp_path):
 
 def test_layout_is_aligned():
     layout = image.plan(iso_size=1_706_178_560, data_size=20 * image.MIB + 1)
-    for value in (layout.ais_start, layout.data_start, layout.data_size):
-        assert value % image.MIB == 0
-    assert layout.ais_start >= 1_706_178_560
-    assert layout.data_start == layout.ais_start + image.AIS_SIZE
+    assert layout.data_start % image.MIB == 0 and layout.data_size % image.MIB == 0
+    assert layout.data_start >= 1_706_178_560
     assert layout.data_size == 21 * image.MIB
 
 
@@ -147,22 +151,17 @@ def partitions(img: Path) -> dict[str, dict]:
 def test_image_layout(built):
     img, iso = built
     parts = partitions(img)
-    assert {"EFI boot partition", "PROXMOX-AIS", "SNAPDATA"} <= parts.keys()
-    ais, data = parts["PROXMOX-AIS"], parts["SNAPDATA"]
-    assert ais["start"] * 512 >= iso.stat().st_size
-    assert data["start"] == ais["start"] + ais["size"]
+    assert {"EFI boot partition", "SNAPDATA"} <= parts.keys()
+    assert "PROXMOX-AIS" not in parts
+    assert parts["SNAPDATA"]["start"] * 512 >= iso.stat().st_size
     assert image.iso_uuid(img) == image.iso_uuid(iso)
     assert img.with_name("snap.img.sha256").read_text().split()[0] == fetch.sha256(img)
 
 
 @needs_image_tools
-def test_answer_partition(built):
+def test_answer_file_goes_inside_the_iso(built):
     img, _ = built
-    ais = partitions(img)["PROXMOX-AIS"]
-    target = f"{img}@@{ais['start'] * 512}"
-    label = subprocess.run(["mlabel", "-s", "-i", target, "::"], capture_output=True, text=True).stdout
-    assert "PROXMOX-AIS" in label
-    toml = subprocess.run(["mtype", "-i", target, "::answer.toml"], check=True, capture_output=True, text=True).stdout
+    toml = (img.parent / "cache" / "last-answer.toml").read_text()
     assert 'filter.ID_SERIAL_SHORT = "S4EWNX0R123456"' in toml
 
 

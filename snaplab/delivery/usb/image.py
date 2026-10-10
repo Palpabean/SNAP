@@ -3,10 +3,13 @@
 The stick is the Proxmox installer's own hybrid ISO, written from the first
 sector exactly as Proxmox intends, with two partitions appended after it:
 
-    | Proxmox ISO (prepared, SNAP boot menu) | PROXMOX-AIS (FAT) | SNAPDATA (ext4) |
+    | Proxmox ISO (prepared, answer file inside, SNAP boot menu) | SNAPDATA (ext4) |
 
-Everything happens in a regular file with xorriso, mkfs.vfat, mtools, mkfs.ext4
-and sfdisk, so no loop devices or root privileges are needed.
+The answer file lives inside the ISO: the installer mounts the whole stick as
+its ISO, and Linux then refuses to mount a partition of the same stick.
+
+Everything happens in a regular file with xorriso, mkfs.ext4 and sfdisk, so no
+loop devices or root privileges are needed.
 """
 
 from __future__ import annotations
@@ -23,12 +26,9 @@ ALIGN = MIB
 # Room after the last partition for the backup GPT.
 TAIL = MIB
 
-TYPE_BASIC_DATA = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
 TYPE_LINUX_DATA = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
 
-AIS_LABEL = "PROXMOX-AIS"
 DATA_LABEL = "SNAPDATA"
-AIS_SIZE = 4 * MIB
 # The ISO's first 32 KiB: boot code, MBR and GPT.
 SYSTEM_AREA = 32 * 1024
 
@@ -53,10 +53,8 @@ def align_up(n: int, to: int = ALIGN) -> int:
 
 @dataclass(frozen=True)
 class Layout:
-    """Byte offsets and sizes of the appended partitions."""
+    """Byte offset and size of the appended SNAPDATA partition."""
 
-    ais_start: int
-    ais_size: int
     data_start: int
     data_size: int
 
@@ -66,9 +64,7 @@ class Layout:
 
 
 def plan(iso_size: int, data_size: int) -> Layout:
-    ais_start = align_up(iso_size)
-    data_start = ais_start + AIS_SIZE
-    return Layout(ais_start, AIS_SIZE, data_start, align_up(data_size))
+    return Layout(align_up(iso_size), align_up(data_size))
 
 
 # --- ISO9660 volume UUID -------------------------------------------------
@@ -126,13 +122,6 @@ def replace_boot_menu(prepared_iso: Path, files: dict[str, bytes], out: Path) ->
             raise ImageError("the ISO's boot code or partition table changed; refusing it")
 
 
-def make_ais(answer_toml: Path, out: Path) -> None:
-    """The small FAT partition the Proxmox installer reads answer.toml from."""
-    out.unlink(missing_ok=True)
-    run(["mkfs.vfat", "-C", "-n", AIS_LABEL, str(out), str(AIS_SIZE // 1024)])
-    run(["mcopy", "-i", str(out), str(answer_toml), "::answer.toml"])
-
-
 def make_data(payload: Path, out: Path) -> None:
     """The ext4 SNAPDATA partition, filled from the payload directory."""
     used = sum(f.stat().st_size for f in payload.rglob("*") if f.is_file())
@@ -157,25 +146,20 @@ def make_data(payload: Path, out: Path) -> None:
     )
 
 
-def assemble(iso: Path, ais: Path, data: Path, out: Path) -> Layout:
-    """Append the two partitions to the ISO and record them in its GPT."""
+def assemble(iso: Path, data: Path, out: Path) -> Layout:
+    """Append the SNAPDATA partition to the ISO and record it in its GPT."""
     layout = plan(iso.stat().st_size, data.stat().st_size)
-    if ais.stat().st_size != layout.ais_size:
-        raise ImageError("unexpected PROXMOX-AIS image size")
     if out != iso:
-        raise ImageError("assemble works in place on the remastered ISO")
+        raise ImageError("assemble works in place on the ISO")
 
     with out.open("r+b") as f:
         f.truncate(layout.total)
-        for start, src in ((layout.ais_start, ais), (layout.data_start, data)):
-            f.seek(start)
-            with src.open("rb") as s:
-                while chunk := s.read(MIB):
-                    f.write(chunk)
+        f.seek(layout.data_start)
+        with data.open("rb") as s:
+            while chunk := s.read(MIB):
+                f.write(chunk)
 
     script = (
-        f"start={layout.ais_start // SECTOR}, size={layout.ais_size // SECTOR}, "
-        f'type={TYPE_BASIC_DATA}, name="{AIS_LABEL}"\n'
         f"start={layout.data_start // SECTOR}, size={layout.data_size // SECTOR}, "
         f'type={TYPE_LINUX_DATA}, name="{DATA_LABEL}"\n'
     )

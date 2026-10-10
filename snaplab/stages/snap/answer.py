@@ -1,7 +1,7 @@
 """Render the Proxmox installer answer file (answer.toml) from snap.yaml.
 
-Design 0001, section 7.1, step 4. The installer reads this file from the
-PROXMOX-AIS partition and installs without asking anything. Key names follow
+Design 0001, section 7.1, step 4. The builder puts this file inside the
+Proxmox ISO, and the installer installs without asking anything. Key names follow
 the Proxmox VE 9 automated installer; CI checks the output with the pinned
 proxmox-auto-install-assistant.
 """

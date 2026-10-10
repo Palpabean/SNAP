@@ -2,10 +2,9 @@
 
     snaplab build snap.yaml -o snap.img
 
-Steps: validate the config, fetch and verify the pinned Proxmox ISO, prepare it
-for unattended install with Proxmox's own assistant, render and check the
-answer file, then assemble the stick (see image.py). Prepared ISOs and
-downloads are cached, so rebuilding for a changed snap.yaml takes seconds.
+Steps: validate the config, fetch and verify the pinned Proxmox ISO, render and
+check the answer file, put it inside the ISO with Proxmox's own assistant,
+then assemble the stick (see image.py). Downloads and prepared ISOs are cached.
 
 Runs on Debian with proxmox-auto-install-assistant installed, most simply in
 the container from snaplab/delivery/usb/Containerfile.
@@ -26,7 +25,7 @@ from snaplab.delivery.usb import fetch, image, menu
 from snaplab.stages.snap import answer
 
 ASSISTANT = "proxmox-auto-install-assistant"
-TOOLS = [ASSISTANT, "xorriso", "mkfs.vfat", "mcopy", "mkfs.ext4", "sfdisk"]
+TOOLS = [ASSISTANT, "xorriso", "mkfs.ext4", "sfdisk"]
 REPO_LOCK = Path(__file__).resolve().parents[3] / "checksums.lock"
 
 
@@ -65,9 +64,15 @@ def assistant_version() -> str:
     raise BuildError(f"cannot tell which {ASSISTANT} version is installed")
 
 
-def prepare(iso: Path, firstboot: bytes, assistant: str, cache: Path, log=print) -> Path:
-    """Run prepare-iso once per (ISO, first-boot script, assistant) combination."""
-    key = hashlib.sha256(fetch.sha256(iso).encode() + firstboot + assistant.encode()).hexdigest()[:16]
+def prepare(iso: Path, answer_toml: str, firstboot: bytes, assistant: str, cache: Path, log=print) -> Path:
+    """Run prepare-iso once per (ISO, answer file, first-boot script, assistant) combination.
+
+    The answer file goes inside the ISO (--fetch-from iso). A separate answer
+    partition on the same stick cannot work: the installer mounts the whole
+    stick as its ISO, and Linux then refuses to mount one of its partitions.
+    """
+    parts = (fetch.sha256(iso).encode(), answer_toml.encode(), firstboot, assistant.encode())
+    key = hashlib.sha256(b"\0".join(parts)).hexdigest()[:16]
     prepared = cache / f"{iso.stem}-snap-{key}.iso"
     if prepared.exists():
         log(f"using cached prepared ISO {prepared.name}")
@@ -76,6 +81,8 @@ def prepare(iso: Path, firstboot: bytes, assistant: str, cache: Path, log=print)
     with tempfile.TemporaryDirectory(dir=cache) as tmp:
         script = Path(tmp) / "snap-firstboot.sh"
         script.write_bytes(firstboot)
+        answer_file = Path(tmp) / "answer.toml"
+        answer_file.write_text(answer_toml)
         partial = Path(tmp) / "prepared.iso"
         image.run(
             [
@@ -83,9 +90,9 @@ def prepare(iso: Path, firstboot: bytes, assistant: str, cache: Path, log=print)
                 "prepare-iso",
                 str(iso),
                 "--fetch-from",
-                "partition",
-                "--partition-label",
-                image.AIS_LABEL,
+                "iso",
+                "--answer-file",
+                str(answer_file),
                 "--on-first-boot",
                 str(script),
                 "--output",
@@ -130,17 +137,16 @@ def build(
     pve = lock["proxmox-ve"]
     iso = fetch.fetch(pve["url"], pve["sha256"], cache, log=log)
     firstboot = _asset("snaplab.stages.snap", "firstboot.sh")
-    prepared = prepare(iso, firstboot, installed, cache, log=log)
 
     output = output.resolve()
     with tempfile.TemporaryDirectory(dir=output.parent, prefix=".snaplab-") as tmp:
         work = Path(tmp)
-        answer_toml = work / "answer.toml"
-        answer_toml.write_text(answer.render(cfg))
-        image.run([ASSISTANT, "validate-answer", str(answer_toml)])
+        answer_toml = answer.render(cfg)
+        (work / "answer.toml").write_text(answer_toml)
+        image.run([ASSISTANT, "validate-answer", str(work / "answer.toml")])
+        prepared = prepare(iso, answer_toml, firstboot, installed, cache, log=log)
 
         make_payload(config_path, work / "payload")
-        image.make_ais(answer_toml, work / "ais.img")
         image.make_data(work / "payload", work / "data.img")
 
         log("assembling the USB image")
@@ -150,7 +156,7 @@ def build(
         except menu.MenuError as e:
             raise BuildError(str(e)) from e
         image.replace_boot_menu(prepared, menu_files, stick)
-        image.assemble(stick, work / "ais.img", work / "data.img", stick)
+        image.assemble(stick, work / "data.img", stick)
         stick.replace(output)
 
     digest = fetch.sha256(output)
