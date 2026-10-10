@@ -35,6 +35,7 @@ qemu() {
     fi
     timeout "$limit" qemu-system-x86_64 -enable-kvm -cpu host -smp 2 -m 4096 \
         -display none -serial "file:$log" -no-reboot -pidfile "$WORK/qemu.pid" "${fw[@]}" \
+        -monitor "unix:$WORK/monitor.sock,server,nowait" \
         -nic user,model=virtio-net-pci \
         -device qemu-xhci -drive "file=$WORK/stick.img,format=raw,if=none,id=stick" \
         -device usb-storage,drive=stick,bootindex=0 \
@@ -62,7 +63,14 @@ for _ in $(seq 1800); do
     if grep -aqE "SNAP: .*(failed|missing)" "$WORK/pass2.log"; then result=failed; break; fi
     [ -s "$WORK/qemu.pid" ] && ! kill -0 "$(cat "$WORK/qemu.pid")" 2>/dev/null && { result=exited; break; }
 done
-kill "$(cat "$WORK/qemu.pid")" 2>/dev/null || true
+# Shut the host down cleanly (ACPI power button), so everything it wrote reaches the disk.
+python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"system_powerdown\n")' \
+    "$WORK/monitor.sock" 2>/dev/null || true
+for _ in $(seq 180); do
+    kill -0 "$(cat "$WORK/qemu.pid")" 2>/dev/null || break
+    sleep 1
+done
+kill "$(cat "$WORK/qemu.pid")" 2>/dev/null && echo "e2e: the host did not power off within 3 minutes; stopped it" || true
 wait || true
 tr -d '\r' < "$WORK/pass2.log" | grep -a "SNAP" || true
 echo "CRACKLE result: $result"

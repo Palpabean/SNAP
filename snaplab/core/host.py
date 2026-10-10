@@ -57,19 +57,29 @@ class Host:
             return None
 
     def write(self, path: str | Path, text: str, mode: int = 0o644) -> None:
-        """Write a file atomically."""
+        """Write a file atomically and durably (state and progress must survive a power cut)."""
         target = self.path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name(f".{target.name}.snap-tmp")
-        tmp.write_text(text)
+        with tmp.open("w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())  # survive a power cut right after the write
         tmp.chmod(mode)
         os.replace(tmp, target)
+        dirfd = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(dirfd)
+        finally:
+            os.close(dirfd)
 
     def append(self, path: str | Path, text: str) -> None:
         target = self.path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("a") as f:
             f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
 
     def mkdir(self, path: str | Path, mode: int = 0o755) -> None:
         target = self.path(path)
