@@ -32,14 +32,20 @@ class Host:
 
     def run(self, *cmd: str, input: str | None = None) -> str:
         """Run a command and return its output; raise CommandError if it fails."""
-        proc = subprocess.run(list(cmd), input=input, capture_output=True, text=True)
+        try:
+            proc = subprocess.run(list(cmd), input=input, capture_output=True, text=True)
+        except FileNotFoundError as e:
+            raise CommandError(list(cmd), 127, f"{cmd[0]}: command not found") from e
         if proc.returncode != 0:
             raise CommandError(list(cmd), proc.returncode, proc.stdout + proc.stderr)
         return proc.stdout
 
     def ok(self, *cmd: str) -> bool:
-        """True if the command succeeds. For checks; output is discarded."""
-        return subprocess.run(list(cmd), capture_output=True).returncode == 0
+        """True if the command succeeds. For checks; output is discarded. A missing command is a failure."""
+        try:
+            return subprocess.run(list(cmd), capture_output=True).returncode == 0
+        except FileNotFoundError:
+            return False
 
     def exists(self, path: str | Path) -> bool:
         return self.path(path).exists()
