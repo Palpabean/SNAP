@@ -45,7 +45,7 @@ jobs:
         run: docker build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
       - name: Build the USB image
         run: |
-          docker run --rm -v "$PWD:/work" snaplab-builder build examples/snap.example.yaml -o snap.img
+          docker run --rm -v "$PWD:/work" snaplab-builder build examples/snap.example.yaml -o snap.img --serial-console
           sudo chown -R "$(id -u)" .snaplab-cache snap.img snap.img.sha256
       - name: Install, restart, hand off
         run: tests/usb/e2e.sh snap.img ${{ matrix.firmware }}

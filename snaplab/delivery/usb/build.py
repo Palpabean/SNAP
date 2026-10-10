@@ -108,7 +108,14 @@ def make_payload(config_path: Path, dest: Path) -> None:
     (dest / "payload.sha256").write_text(manifest)
 
 
-def build(config_path: Path, output: Path, cache: Path | None = None, lock_path: Path = REPO_LOCK, log=print) -> Path:
+def build(
+    config_path: Path,
+    output: Path,
+    cache: Path | None = None,
+    lock_path: Path = REPO_LOCK,
+    serial_console: bool = False,
+    log=print,
+) -> Path:
     cfg = config.load(config_path)
     lock = fetch.load_lock(lock_path)
     cache = cache or default_cache()
@@ -139,7 +146,7 @@ def build(config_path: Path, output: Path, cache: Path | None = None, lock_path:
         log("assembling the USB image")
         stick = work / "snap.img"
         try:
-            menu_files = menu.files(image.read_file(prepared, "/boot/grub/grub.cfg"))
+            menu_files = menu.files(image.read_file(prepared, "/boot/grub/grub.cfg"), serial_console)
         except menu.MenuError as e:
             raise BuildError(str(e)) from e
         image.replace_boot_menu(prepared, menu_files, stick)

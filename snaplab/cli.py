@@ -23,6 +23,9 @@ def main(argv: list[str] | None = None) -> int:
     usb.add_argument("file", help="path to snap.yaml")
     usb.add_argument("-o", "--output", default="snap.img", help="image to write (default: snap.img)")
     usb.add_argument("--cache", type=Path, help="download cache (default: $SNAPLAB_CACHE or ~/.cache/snaplab)")
+    usb.add_argument(
+        "--serial-console", action="store_true", help="also show installer and system output on the first serial port"
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -39,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         from snaplab.delivery.usb import build, fetch, image
 
         try:
-            out = build.build(Path(args.file), Path(args.output), cache=args.cache)
+            out = build.build(Path(args.file), Path(args.output), cache=args.cache, serial_console=args.serial_console)
         except (build.BuildError, fetch.FetchError, image.ImageError) as e:
             print(f"build failed: {e}", file=sys.stderr)
             return 1

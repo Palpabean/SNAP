@@ -3,6 +3,8 @@
 #
 #   tests/usb/e2e.sh snap.img bios|uefi
 #
+# Build the stick with --serial-console so the installer's output lands in the logs.
+#
 # Pass 1 boots the stick next to an empty SATA disk whose serial matches
 # examples/snap.example.yaml; the unattended install must finish and restart.
 # Pass 2 boots the stick again: its menu must detect the install and boot it,
@@ -44,9 +46,9 @@ qemu() {
 echo "== pass 1: unattended install ($FIRMWARE)"
 # The SNAP menu shows on screen and serial; its default entry starts the install.
 start=$(date +%s)
-if ! qemu "$WORK/pass1.log" 45m; then
-    echo "e2e: the install did not finish and restart within 45 minutes" >&2
-    tail -c 4000 "$WORK/pass1.log" >&2 || true
+if ! qemu "$WORK/pass1.log" 30m; then
+    echo "e2e: the install did not finish and restart within 30 minutes" >&2
+    tr -d '\r' < "$WORK/pass1.log" | tail -n 150 >&2 || true
     exit 1
 fi
 echo "install finished in $(( $(date +%s) - start ))s"

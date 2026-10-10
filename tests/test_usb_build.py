@@ -334,3 +334,11 @@ def test_menu_is_valid_grub_script(tmp_path):
     cfg.write_text(menu.render(STANDIN_GRUB_CFG))
     result = subprocess.run(["grub-script-check", str(cfg)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_menu_serial_console_option():
+    plain = menu.render(STANDIN_GRUB_CFG)
+    serial = menu.render(STANDIN_GRUB_CFG, serial_console=True)
+    assert "console=ttyS0" not in plain and "@KERNEL_EXTRA@" not in plain
+    assert "proxmox-start-auto-installer console=tty0 console=ttyS0,115200" in serial
+    assert "root=/dev/mapper/pve-root quiet console=tty0 console=ttyS0,115200" in serial
