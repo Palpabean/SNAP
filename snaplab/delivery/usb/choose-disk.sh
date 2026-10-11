@@ -41,7 +41,7 @@ snap_disk_list() {
 snap_describe() {
     d=$snap_sys/$1
     gb=$(( $(cat "$d/size") * 512 / 1000000000 ))
-    model=$(cat "$d/device/model" 2>/dev/null | sed 's/  */ /g; s/^ //; s/ $//')
+    model=$(sed 's/  */ /g; s/^ //; s/ $//' "$d/device/model" 2>/dev/null)
     echo "$1  ${model:-unknown model}  ${gb} GB"
 }
 
