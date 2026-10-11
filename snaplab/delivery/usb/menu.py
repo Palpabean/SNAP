@@ -11,11 +11,15 @@ from __future__ import annotations
 
 from importlib import resources
 
+from snaplab.delivery.usb import initrd
+
 AUTO_ENTRY = "Install Proxmox VE (Automated)"
 AUTO_FLAG = "proxmox-start-auto-installer"
 # Kernel output on both the screen and the first serial port; the serial port
 # becomes /dev/console, so the installer's messages appear there.
 SERIAL_CONSOLE = " console=tty0 console=ttyS0,115200"
+# The disk prompt's extra initrd, loaded after Proxmox's (initrd.py).
+DISK_PROMPT = "/boot/snap/disk-prompt.img"
 
 
 class MenuError(Exception):
@@ -52,14 +56,17 @@ def render(pve_cfg: str, serial_console: bool = False) -> str:
     template = resources.files("snaplab.delivery.usb").joinpath("grub-snap.cfg").read_text()
     return (
         template.replace("@PVE_LINUX@", linux)
-        .replace("@PVE_INITRD@", initrd)
+        .replace("@PVE_INITRD@", f"{initrd} {DISK_PROMPT}")
         .replace("@KERNEL_EXTRA@", SERIAL_CONSOLE if serial_console else "")
     )
 
 
-def files(pve_cfg: str, serial_console: bool = False) -> dict[str, bytes]:
+def files(pve_cfg: str, pve_initrd: bytes, serial_console: bool = False) -> dict[str, bytes]:
     """Everything the SNAP menu adds to the ISO, by path on the ISO."""
-    out = {"/boot/grub/grub.cfg": render(pve_cfg, serial_console).encode()}
+    out = {
+        "/boot/grub/grub.cfg": render(pve_cfg, serial_console).encode(),
+        DISK_PROMPT: initrd.overlay(pve_initrd),
+    }
     for item in resources.files("snaplab.delivery.usb").joinpath("theme").iterdir():
         out[f"/boot/grub/snap/{item.name}"] = item.read_bytes()
     return out

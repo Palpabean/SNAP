@@ -47,7 +47,8 @@ jobs:
       - name: Build the USB image
         run: |
           docker run --rm -v "$PWD:/work" snaplab-builder build tests/usb/e2e.yaml -o snap.img --serial-console
-          sudo chown -R "$(id -u)" .snaplab-cache snap.img snap.img.sha256
+          sudo chown -R "$(id -u)" .snaplab-cache snap.img snap.img.sha256 snap.img.password.txt
+          test -s snap.img.password.txt  # no passwords in the config: the builder made one
       - name: Install, restart, hand off
         run: tests/usb/e2e.sh snap.img ${{ matrix.firmware }}
       - name: Keep the serial logs

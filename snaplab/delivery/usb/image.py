@@ -90,12 +90,16 @@ def iso_uuid(path: Path) -> str:
 # --- steps -----------------------------------------------------------------
 
 
-def read_file(iso: Path, path: str) -> str:
+def read_bytes(iso: Path, path: str) -> bytes:
     """Read one file from an ISO."""
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "file"
         run(["xorriso", "-osirrox", "on", "-indev", str(iso), "-extract", path, str(out)])
-        return out.read_text()
+        return out.read_bytes()
+
+
+def read_file(iso: Path, path: str) -> str:
+    return read_bytes(iso, path).decode()
 
 
 def replace_boot_menu(prepared_iso: Path, files: dict[str, bytes], out: Path) -> None:

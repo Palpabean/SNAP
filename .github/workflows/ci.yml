@@ -44,9 +44,10 @@ jobs:
           apt-get install -y --no-install-recommends proxmox-auto-install-assistant
       - name: Render and validate answer files
         run: |
-          for cfg in examples/snap.example.yaml tests/fixtures/static.yaml; do
-            python3 -m snaplab answer "$cfg" -o answer.toml
-            echo "== $cfg"; cat answer.toml
+          apt-get install -y --no-install-recommends openssl
+          for cfg in examples/snap.example.yaml tests/fixtures/static.yaml ""; do
+            python3 -m snaplab answer $cfg -o answer.toml
+            echo "== ${cfg:-the built-in lab (disk chosen at boot)}"; cat answer.toml
             proxmox-auto-install-assistant validate-answer answer.toml
           done
 

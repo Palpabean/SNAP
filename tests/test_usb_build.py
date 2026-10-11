@@ -8,6 +8,7 @@ also need QEMU and OVMF. CI's usb-image job installs all of them.
 """
 
 import bz2
+import gzip
 import json
 import os
 import select
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from snaplab.delivery.usb import build, fetch, image, menu
+from snaplab.delivery.usb import build, fetch, image, initrd, menu
 
 ROOT = Path(__file__).parent.parent
 EXAMPLE = ROOT / "examples" / "snap.example.yaml"
@@ -59,6 +60,11 @@ esac
 
 # Shaped like the Proxmox VE 9.2 menu: the builder copies the automated entry's
 # linux and initrd lines into the SNAP menu and must never show this menu.
+# Proxmox's initrd in miniature: a compressed archive whose /init has the line
+# the disk prompt hooks in before.
+STANDIN_INIT = "#!/bin/sh\necho stand-in\n" + initrd.ANCHOR + "        exec switch_root\n    fi\n"
+STANDIN_INITRD = gzip.compress(initrd.archive({"init": (0o100755, STANDIN_INIT.encode())}))
+
 STANDIN_GRUB_CFG = """set timeout=10
 if [ -f auto-installer-mode.toml ]; then
     menuentry 'Install Proxmox VE (Automated)' --class debian --class gnu-linux --class gnu --class os {
@@ -149,7 +155,7 @@ def built(tmp_path_factory):
     root.mkdir(parents=True)
     (root / "grub.cfg").write_text(STANDIN_GRUB_CFG)
     (root.parent / "linux26").write_text("stand-in kernel\n")
-    (root.parent / "initrd.img").write_text("stand-in initrd\n")
+    (root.parent / "initrd.img").write_bytes(STANDIN_INITRD)
     iso = tmp / "mirror" / "proxmox-ve_9.2-1.iso"
     iso.parent.mkdir()
     subprocess.run(["grub-mkrescue", "-o", str(iso), str(tmp / "isoroot")], check=True, capture_output=True)
@@ -250,8 +256,12 @@ def test_boot_menu_replaces_proxmox_menu(built):
     assert shipped == menu.render(STANDIN_GRUB_CFG)
     assert "Install Proxmox VE (Graphical)" not in shipped
     assert "linux /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent proxmox-start-auto-installer" in shipped
+    assert "initrd /boot/initrd.img /boot/snap/disk-prompt.img" in shipped
+    # The disk prompt: Proxmox's own start-up script with one line added, and the prompt.
+    prompt = image.read_bytes(img, "/boot/snap/disk-prompt.img")
+    assert initrd.read_init(prompt) == initrd.patch_init(STANDIN_INIT)
     # Everything else on the ISO is untouched.
-    assert image.read_file(img, "/boot/initrd.img") == image.read_file(iso, "/boot/initrd.img")
+    assert image.read_bytes(img, "/boot/initrd.img") == image.read_bytes(iso, "/boot/initrd.img")
 
 
 # --- boot ------------------------------------------------------------------

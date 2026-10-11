@@ -5,7 +5,7 @@ import pytest
 import yaml
 
 from snaplab import cli
-from snaplab.core import config
+from snaplab.core import config, defaults
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "snap.example.yaml"
 
@@ -73,11 +73,45 @@ def test_invalid_ipv4(cfg):
     assert "networks[0].router" in errors_for(cfg)
 
 
-def test_machines_need_a_credential(cfg):
-    del cfg["machines"]["password_hash"]
-    assert "machines" in errors_for(cfg)
-    cfg["machines"]["ssh_keys"] = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample user@laptop"]
+def test_passwords_and_disk_may_be_left_out(cfg):
+    # The builder generates the password and the stick asks for the disk.
+    del cfg["machines"]["password_hash"], cfg["host"]["root_password_hash"], cfg["host"]["target_disk"]
     assert config.validate(cfg) == []
+
+
+# --- SNAP's defaults ---
+
+
+def test_no_file_gives_the_default_lab():
+    cfg = config.load()
+    assert [n["name"] for n in cfg["networks"]] == ["lab", "services"]
+    assert cfg["machines"]["count"] == 2 and "target_disk" not in cfg["host"]
+
+
+def test_a_partial_file_changes_only_what_it_gives(tmp_path):
+    f = tmp_path / "snap.yaml"
+    f.write_text("host:\n  timezone: Europe/Berlin\nmachines:\n  count: 1\n")
+    cfg = config.load(f)
+    assert cfg["host"]["timezone"] == "Europe/Berlin" and cfg["host"]["hostname"] == "snap"
+    assert cfg["machines"]["count"] == 1 and cfg["machines"]["memory_mb"] == 2048
+
+
+def test_networks_in_a_file_replace_the_default_ones(tmp_path):
+    f = tmp_path / "snap.yaml"
+    f.write_text(
+        "networks:\n  - {name: one, cidr: 10.1.0.0/24, router: 10.1.0.1, policy: open,"
+        " dhcp: {enabled: true, start: 10.1.0.10, end: 10.1.0.99}}\nmachines:\n  network: one\n"
+    )
+    assert [n["name"] for n in config.load(f)["networks"]] == ["one"]
+
+
+def test_generated_password():
+    cfg, password = defaults.fill_passwords(config.load())
+    assert len(password) == 19 and password.count("-") == 3
+    assert cfg["host"]["root_password_hash"].startswith("$6$")
+    assert cfg["machines"]["password_hash"] == cfg["host"]["root_password_hash"]
+    again, none = defaults.fill_passwords(cfg)
+    assert none is None and again == cfg
 
 
 def test_root_username_is_rejected(cfg):

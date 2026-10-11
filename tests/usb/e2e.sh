@@ -7,8 +7,9 @@
 # Build the stick from tests/usb/e2e.yaml with --serial-console so the
 # installer's and the engine's output land in the logs.
 #
-# Pass 1 boots the stick next to an empty SATA disk whose serial matches
-# examples/snap.example.yaml; the unattended install must finish and restart.
+# Pass 1 boots the stick next to an empty SATA disk; the stick's disk prompt
+# must offer it and use it after its countdown, and the unattended install
+# must finish and restart.
 # Pass 2 boots the stick again: its menu must detect the install and boot it,
 # and the first-boot handoff must copy the payload, then CRACKLE and POP run.
 # The target disk is then inspected with LVM on the host.
@@ -55,6 +56,11 @@ if ! qemu "$WORK/pass1.log" 30m; then
     exit 1
 fi
 echo "install finished in $(( $(date +%s) - start ))s"
+# Plug-and-play: no disk was named, so the stick asked; with one disk it counts down and uses it.
+grep -a "SNAP will install Proxmox VE on:" "$WORK/pass1.log" || {
+    echo "e2e: the stick did not offer the only disk" >&2
+    exit 1
+}
 
 echo "== pass 2: boot the stick again; it must start the installed system, which runs CRACKLE and POP"
 qemu "$WORK/pass2.log" 110m &

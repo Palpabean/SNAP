@@ -21,13 +21,15 @@ import tempfile
 from importlib import resources
 from pathlib import Path
 
+import yaml
+
 import snaplab
-from snaplab.core import config
-from snaplab.delivery.usb import debs, fetch, image, menu
+from snaplab.core import config, defaults
+from snaplab.delivery.usb import debs, fetch, image, initrd, menu
 from snaplab.stages.snap import answer
 
 ASSISTANT = "proxmox-auto-install-assistant"
-TOOLS = [ASSISTANT, "xorriso", "mkfs.ext4", "sfdisk", "apt-get", "dpkg-deb"]
+TOOLS = [ASSISTANT, "xorriso", "mkfs.ext4", "sfdisk", "apt-get", "dpkg-deb", "openssl"]
 REPO_LOCK = Path(__file__).resolve().parents[3] / "checksums.lock"
 # What of the package goes on the stick for the host: the engine and the files
 # the stages hand to OpenTofu and Ansible.
@@ -108,7 +110,9 @@ def prepare(iso: Path, answer_toml: str, firstboot: bytes, assistant: str, cache
     return prepared
 
 
-def make_payload(config_path: Path, cfg: dict, files: dict[str, Path], dest: Path, tools: dict | None = None) -> None:
+def make_payload(
+    config_path: Path | None, cfg: dict, files: dict[str, Path], dest: Path, tools: dict | None = None
+) -> None:
     """The SNAPDATA contents, copied to /var/lib/snap on the host at first boot.
 
     snap.yaml (as written) and snap.json (validated, for the host, which has no
@@ -118,7 +122,12 @@ def make_payload(config_path: Path, cfg: dict, files: dict[str, Path], dest: Pat
     the bundled tools, and a checksum manifest over everything.
     """
     (dest / "bin").mkdir(parents=True)
-    shutil.copyfile(config_path, dest / "snap.yaml")
+    if config_path is not None:
+        shutil.copyfile(config_path, dest / "snap.yaml")
+    else:
+        (dest / "snap.yaml").write_text(
+            "# No snap.yaml was given: SNAP's built-in lab.\n" + yaml.safe_dump(cfg, sort_keys=False)
+        )
     (dest / "snap.json").write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n")
     command = dest / "bin" / "snap"
     command.write_bytes(_asset("snaplab.delivery.usb", "snap-host.sh"))
@@ -183,14 +192,14 @@ def bundle_debs(spec: dict, repo: Path, log=print) -> dict:
 
 
 def build(
-    config_path: Path,
+    config_path: Path | None,
     output: Path,
     cache: Path | None = None,
     lock_path: Path = REPO_LOCK,
     serial_console: bool = False,
     log=print,
 ) -> Path:
-    cfg = config.load(config_path)
+    cfg, password = defaults.fill_passwords(config.load(config_path))
     lock = fetch.load_lock(lock_path)
     cache = cache or default_cache()
     cache.mkdir(parents=True, exist_ok=True)
@@ -223,8 +232,10 @@ def build(
         log("assembling the USB image")
         stick = work / "snap.img"
         try:
-            menu_files = menu.files(image.read_file(prepared, "/boot/grub/grub.cfg"), serial_console)
-        except menu.MenuError as e:
+            pve_cfg = image.read_file(prepared, "/boot/grub/grub.cfg")
+            _, pve_initrd = menu.auto_install_entry(pve_cfg)
+            menu_files = menu.files(pve_cfg, image.read_bytes(prepared, pve_initrd), serial_console)
+        except (menu.MenuError, initrd.InitrdError) as e:
             raise BuildError(str(e)) from e
         image.replace_boot_menu(prepared, menu_files, stick)
         image.assemble(stick, work / "data.img", stick)
@@ -233,4 +244,19 @@ def build(
     digest = fetch.sha256(output)
     output.with_name(output.name + ".sha256").write_text(f"{digest}  {output.name}\n")
     log(f"wrote {output} ({output.stat().st_size // image.MIB} MiB, sha256 {digest})")
+    if password:
+        note = password_file(output)
+        note.write_text(
+            f"SNAP lab built as {output.name}\n\n"
+            f"Password: {password}\n\n"
+            "It logs you in as root on Proxmox (web page at https://<this computer>:8006) and on the\n"
+            f"router, and as '{cfg['machines']['username']}' on the lab machines, wherever no other\n"
+            "password was set. Keep this file private.\n"
+        )
+        note.chmod(0o600)
+        log(f"password for the lab: {password}  (also saved in {note.name})")
     return output
+
+
+def password_file(output: Path) -> Path:
+    return output.with_name(output.name + ".password.txt")

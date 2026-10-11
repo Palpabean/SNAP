@@ -17,6 +17,8 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 
+from snaplab.core import defaults
+
 # The admin network's VLAN on the lab bridge (D8) must stay free; its address
 # range moves by itself if a lab network takes it (stages/pop/addresses.py).
 from snaplab.stages.pop.opnsense import ADMIN_VLAN
@@ -37,14 +39,22 @@ def load_schema() -> dict[str, Any]:
     return json.loads(text)
 
 
-def load(path: str | Path) -> dict[str, Any]:
-    """Read and validate a snap.yaml file. Raises ConfigError listing every problem."""
-    try:
-        data = yaml.safe_load(Path(path).read_text())
-    except OSError as e:
-        raise ConfigError([f"cannot read {path}: {e.strerror}"]) from e
-    except yaml.YAMLError as e:
-        raise ConfigError([f"{path} is not valid YAML: {e}"]) from e
+def load(path: str | Path | None = None) -> dict[str, Any]:
+    """Read snap.yaml on top of SNAP's defaults (snaplab/core/defaults.py) and validate the result.
+
+    With no path, the defaults alone. A file may give only the settings it
+    changes. Raises ConfigError listing every problem.
+    """
+    data: Any = {}
+    if path is not None:
+        try:
+            data = yaml.safe_load(Path(path).read_text()) or {}
+        except OSError as e:
+            raise ConfigError([f"cannot read {path}: {e.strerror}"]) from e
+        except yaml.YAMLError as e:
+            raise ConfigError([f"{path} is not valid YAML: {e}"]) from e
+    if isinstance(data, dict):
+        data = defaults.merge(defaults.DEFAULTS, data)
     errors = validate(data)
     if errors:
         raise ConfigError(errors)
@@ -73,7 +83,7 @@ def _path(parts) -> str:
 
 def _check_host(host: dict[str, Any]) -> list[str]:
     errors = []
-    if not host["root_password_hash"].startswith(("$6$", "$5$")):
+    if not host.get("root_password_hash", "$6$").startswith(("$6$", "$5$")):
         errors.append(
             "host.root_password_hash: the router (OPNsense) uses this password too and needs "
             "a SHA-512 ($6$) or SHA-256 ($5$) hash; make one with: openssl passwd -6"
