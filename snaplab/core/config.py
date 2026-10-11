@@ -17,6 +17,9 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 
+# The admin network between the Proxmox host and the router (D8) must stay free.
+from snaplab.stages.pop.opnsense import ADMIN_CIDR, ADMIN_VLAN
+
 SCHEMA_VERSION = 1
 
 
@@ -68,13 +71,19 @@ def _path(parts) -> str:
 
 
 def _check_host(host: dict[str, Any]) -> list[str]:
+    errors = []
+    if not host["root_password_hash"].startswith(("$6$", "$5$")):
+        errors.append(
+            "host.root_password_hash: the router (OPNsense) uses this password too and needs "
+            "a SHA-512 ($6$) or SHA-256 ($5$) hash; make one with: openssl passwd -6"
+        )
     mgmt = host["management"]
     if mgmt["mode"] != "static":
-        return []
+        return errors
     iface = ipaddress.IPv4Interface(mgmt["address"])
     if ipaddress.IPv4Address(mgmt["gateway"]) not in iface.network:
-        return [f"host.management.gateway: {mgmt['gateway']} is not inside {iface.network}"]
-    return []
+        errors.append(f"host.management.gateway: {mgmt['gateway']} is not inside {iface.network}")
+    return errors
 
 
 def _check_networks(networks: list[dict[str, Any]]) -> list[str]:
@@ -94,7 +103,9 @@ def _check_networks(networks: list[dict[str, Any]]) -> list[str]:
         seen_names.add(name)
 
         if "vlan" in net:
-            if net["vlan"] in seen_vlans:
+            if net["vlan"] == ADMIN_VLAN:
+                errors.append(f"{where}.vlan: {ADMIN_VLAN} is reserved for SNAP's admin network")
+            elif net["vlan"] in seen_vlans:
                 errors.append(f"{where}.vlan: {net['vlan']} is already used by '{seen_vlans[net['vlan']]}'")
             seen_vlans[net["vlan"]] = name
         else:
@@ -108,6 +119,8 @@ def _check_networks(networks: list[dict[str, Any]]) -> list[str]:
         if cidr.prefixlen > 29:
             errors.append(f"{where}.cidr: /{cidr.prefixlen} is too small for a router and machines; use /29 or larger")
             continue
+        if cidr.overlaps(ADMIN_CIDR):
+            errors.append(f"{where}.cidr: {cidr} overlaps SNAP's admin network {ADMIN_CIDR}")
         parsed.append((name, cidr))
 
         hosts = (cidr.network_address, cidr.broadcast_address)

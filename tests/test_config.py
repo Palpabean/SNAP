@@ -139,6 +139,23 @@ def test_duplicate_vlans(cfg):
     assert "networks[1].vlan" in errors_for(cfg)
 
 
+def test_admin_vlan_is_reserved(cfg):
+    cfg["networks"][0]["vlan"] = 4094
+    assert "reserved for SNAP's admin network" in errors_for(cfg)
+
+
+def test_admin_network_is_kept_free(cfg):
+    cfg["networks"][0].update(cidr="172.31.0.0/16", router="172.31.0.1")
+    cfg["networks"][0]["dhcp"].update(start="172.31.0.100", end="172.31.0.199")
+    cfg["networks"][0].pop("rules")
+    assert "overlaps SNAP's admin network" in errors_for(cfg)
+
+
+def test_root_hash_must_suit_the_router(cfg):
+    cfg["host"]["root_password_hash"] = "$y$j9T$abc$def"
+    assert "openssl passwd -6" in errors_for(cfg)
+
+
 def test_overlapping_networks(cfg):
     cfg["networks"][1].update(cidr="10.10.0.0/16", router="10.10.20.1")
     assert "overlaps" in errors_for(cfg)
