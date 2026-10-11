@@ -62,6 +62,9 @@ jobs:
         run: |
           set -a; . work/api.env; set +a
           ansible-playbook tests/opnsense/check.yml
+      - name: Show the serial log
+        if: failure()
+        run: cat -v work/opnsense-serial.log || true
       - name: Keep the serial log
         if: always()
         uses: actions/upload-artifact@v4

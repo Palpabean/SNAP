@@ -13,6 +13,7 @@ Standard library only (runs on the Proxmox host).
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
 import time
 import xml.etree.ElementTree as ET
@@ -157,6 +158,7 @@ class Serial:
                     raise
                 time.sleep(0.5)
         self.seen = ""
+        self.before = ""  # the output just before the last match
 
     def send(self, text: str) -> None:
         self.sock.sendall(text.encode())
@@ -168,6 +170,7 @@ class Serial:
             for needle in needles:
                 index = self.seen.find(needle)
                 if index >= 0:
+                    self.before = self.seen[:index]
                     self.seen = self.seen[index + len(needle) :]
                     return needle
             left = deadline - time.monotonic()
@@ -190,8 +193,17 @@ class Serial:
         self.sock.close()
 
 
-def run_importer(console: Serial, device: str = "cd0", timeout: float = 600, log=None) -> None:
-    """Answer the first-boot importer prompts so config.xml is read from `device`.
+def find_cdrom(devlist: str) -> str | None:
+    """The CD drive in the importer's `camcontrol devlist` output, e.g. cd0."""
+    for line in devlist.splitlines():
+        match = re.search(r"\((?:[a-z]+\d+,)*(cd\d+)[,)]", line)
+        if match:
+            return match.group(1)
+    return None
+
+
+def run_importer(console: Serial, timeout: float = 600, log=None) -> str:
+    """Answer the first-boot importer prompts so config.xml is read from the CD; return the device.
 
     The prompt waits only about seven seconds, so the console must be connected
     before the VM boots this far (connect right after starting it).
@@ -199,9 +211,15 @@ def run_importer(console: Serial, device: str = "cd0", timeout: float = 600, log
     console.wait_for(IMPORTER_PROMPT, timeout=timeout, log=log)
     console.send("\r")
     console.wait_for(DEVICE_PROMPT, timeout=120, log=log)
+    devlist = console.before
+    device = find_cdrom(devlist)
+    if device is None:
+        console.send("\r")  # leave the importer; OPNsense boots with its factory config
+        raise ImportFailed(f"no CD drive in the importer's device list:\n{devlist.strip()}")
     console.send(f"{device}\r")
     found = console.wait_for(
         IMPORTED, "could not be mounted", "No known partition", "could not be found", timeout=120, log=log
     )
     if found != IMPORTED:
         raise ImportFailed(f"the OPNsense importer could not read {device}: {found}")
+    return device

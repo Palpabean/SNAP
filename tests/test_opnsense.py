@@ -48,6 +48,18 @@ def test_bootstrap_config(cfg):
     }
 
 
+DEVLIST = """
+<QEMU HARDDISK 2.5+>               at scbus0 target 0 lun 0 (ada0,pass0)
+<QEMU DVD-ROM 2.5+>                at scbus2 target 0 lun 0 (pass1,cd0)
+"""
+
+
+def test_find_cdrom():
+    assert opnsense.find_cdrom(DEVLIST) == "cd0"
+    assert opnsense.find_cdrom("<QEMU DVD-ROM>  at scbus1 target 0 lun 0 (cd1,pass3)") == "cd1"
+    assert opnsense.find_cdrom("<Virtio disk> (vtbd0)") is None
+
+
 class FakeConsole:
     """A serial socket that plays a script: output, then what it expects back."""
 
@@ -79,12 +91,12 @@ def test_importer_is_answered(tmp_path):
         tmp_path,
         [
             ("Mounting filesystems...\n" + opnsense.IMPORTER_PROMPT + ": ...", "\r"),
-            ("\ncd0 ...\n\n" + opnsense.DEVICE_PROMPT + " (e.g. ada0) or leave blank to exit: ", "cd0\r"),
+            (DEVLIST + "\n" + opnsense.DEVICE_PROMPT + " (e.g. ada0) or leave blank to exit: ", "cd0\r"),
             ("Starting import for partition '/dev/cd0'.\n\n" + opnsense.IMPORTED + "\n", None),
         ],
     )
     console = opnsense.Serial(fake.path, connect_timeout=5)
-    opnsense.run_importer(console, timeout=10)
+    assert opnsense.run_importer(console, timeout=10) == "cd0"
     console.close()
     assert fake.received == ["\r", "cd0\r"]
 
@@ -94,13 +106,25 @@ def test_importer_failure_is_reported(tmp_path):
         tmp_path,
         [
             (opnsense.IMPORTER_PROMPT + ": ...", "\r"),
-            (opnsense.DEVICE_PROMPT + ": ", "cd0\r"),
+            (DEVLIST + opnsense.DEVICE_PROMPT + ": ", "cd0\r"),
             ("The device could not be mounted.\n", None),
         ],
     )
     console = opnsense.Serial(fake.path, connect_timeout=5)
     with pytest.raises(opnsense.ImportFailed, match="could not be mounted"):
         opnsense.run_importer(console, timeout=10)
+
+
+def test_no_cd_drive_leaves_the_importer(tmp_path):
+    fake = FakeConsole(
+        tmp_path,
+        [(opnsense.IMPORTER_PROMPT + ": ...", "\r"), ("<disk> (ada0,pass0)\n" + opnsense.DEVICE_PROMPT, "\r")],
+    )
+    console = opnsense.Serial(fake.path, connect_timeout=5)
+    with pytest.raises(opnsense.ImportFailed, match="no CD drive"):
+        opnsense.run_importer(console, timeout=10)
+    fake.thread.join(5)
+    assert fake.received == ["\r", "\r"]
 
 
 def test_missing_prompt_times_out(tmp_path):
