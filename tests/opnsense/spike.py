@@ -59,12 +59,13 @@ def main(image: str, work: str) -> int:
     ]  # fmt: skip
     for _ in cfg["networks"]:
         nics += ["-nic", "user,model=virtio-net-pci,restrict=on"]
-    qemu = subprocess.Popen(
-        ["qemu-system-x86_64", "-enable-kvm", "-machine", "q35", "-cpu", "host", "-smp", "2", "-m", "2048",
+    cmd = [
+        "qemu-system-x86_64", "-enable-kvm", "-machine", "q35", "-cpu", "host", "-smp", "2", "-m", "2048",
          "-display", "none", "-serial", f"unix:{sock},server=on,wait=off",
          "-drive", f"file={image},format=raw,if=virtio,snapshot=on",
-         "-drive", f"file={iso},media=cdrom,if=ide", *nics]  # fmt: skip
-    )
+         "-drive", f"file={iso},media=cdrom,if=ide", *nics,
+    ]  # fmt: skip
+    qemu = subprocess.Popen(cmd)
     log = (work_dir / "opnsense-serial.log").open("w")
 
     def echo(text: str) -> None:
