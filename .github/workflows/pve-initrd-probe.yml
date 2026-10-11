@@ -20,7 +20,7 @@ jobs:
         with:
           path: .snaplab-cache
           key: snaplab-cache-${{ hashFiles('checksums.lock') }}
-      - run: sudo apt-get install -y -q xorriso zstd cpio
+      - run: sudo apt-get install -y -q xorriso zstd cpio initramfs-tools-core
       - name: Unpack the installer's initrd
         run: |
           set -eux
@@ -32,8 +32,10 @@ jobs:
           xorriso -osirrox on -indev "$iso" -extract /boot/initrd.img initrd.img -extract /boot/grub/grub.cfg grub.cfg
           ls -la initrd.img; file initrd.img
           mkdir root && cd root
-          (zstd -dc ../initrd.img 2>/dev/null || gzip -dc ../initrd.img) | cpio -idm --quiet
+          (zstd -dc ../initrd.img 2>/dev/null || gzip -dc ../initrd.img) | sudo cpio -idm --quiet || true
           find . -maxdepth 2 | sort | head -100
-          echo "===== /init"; cat init
+          echo "===== /init"; cat init || true
+          echo "===== scripts"; ls -R scripts 2>/dev/null | head -50 || true
+          grep -rl "unconfigured\|cdrom\|squashfs" --include='*' . 2>/dev/null | grep -v '^./dev' | head -20 || true
           ls -la sbin bin usr/bin 2>/dev/null | head -80
           echo "===== grub.cfg"; cat ../grub.cfg
