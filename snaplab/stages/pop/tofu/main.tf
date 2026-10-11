@@ -82,6 +82,11 @@ resource "proxmox_virtual_environment_vm" "router" {
     dedicated = var.router.memory_mb
   }
 
+  # No guest agent in the nano image; with it enabled the provider would wait for one.
+  agent {
+    enabled = false
+  }
+
   cdrom {
     interface = "ide2"
     file_id   = var.router.config_iso
@@ -117,6 +122,13 @@ resource "proxmox_virtual_environment_vm" "machine" {
   clone {
     vm_id = each.value.template
     full  = false # linked clone: fast and small
+  }
+
+  # The Ubuntu cloud image has no guest agent installed (and is offline), so the
+  # provider must not wait for one to report addresses; the router's DHCP
+  # reservations fix them instead.
+  agent {
+    enabled = false
   }
 
   cpu {

@@ -251,18 +251,26 @@ def apply_router_settings(ctx: Context) -> None:
 # --- 7. lab machines (OpenTofu) ----------------------------------------------
 
 
+def _tofu_digest(ctx: Context) -> str:
+    variables = lab.tofu_vars(ctx.cfg, ctx.node, _templates(), True, extra_keys=_ssh_keys(ctx))
+    main = ctx.host.read(_source(ctx, "stages", "pop", "tofu", "main.tf")) or ""
+    return _digest([variables, main])
+
+
 def machines_done(ctx: Context) -> bool:
-    if not ctx.host.exists(f"{TOFU_DIR}/terraform.tfstate"):
+    """Applied with the current settings, and every lab machine exists.
+
+    Not `tofu plan`: providers can report harmless differences forever, and
+    the step would never count as done.
+    """
+    if (ctx.host.read(f"{WORK}/machines.sha256") or "").strip() != _tofu_digest(ctx):
         return False
-    try:
-        _tofu(ctx, True, "plan", "-input=false", "-lock=false", "-detailed-exitcode")
-    except Exception:  # noqa: BLE001 - exit code 2 (changes pending) or any error: not done
-        return False
-    return True
+    return all(_vm_config(ctx, m["vmid"]) is not None for m in lab.machines(ctx.cfg))
 
 
 def make_machines(ctx: Context) -> None:
     _tofu(ctx, True, "apply", "-input=false", "-auto-approve")
+    ctx.host.write(f"{WORK}/machines.sha256", _tofu_digest(ctx) + "\n")
 
 
 # --- 8. check the lab from inside --------------------------------------------

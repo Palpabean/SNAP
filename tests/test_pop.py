@@ -322,3 +322,11 @@ def test_failed_playbook_is_reported(host, monkeypatch):
     assert not engine(host).resume()
     state = json.loads(host.read("/var/lib/snap/state.json"))
     assert "router said no" in state["stages"]["pop"]["steps"]["router-settings"]["error"]
+
+
+def test_a_lost_machine_is_recreated(host):
+    assert engine(host).resume()
+    del host.vms[102]
+    host.path(f"{PROGRESS_DIR}/pop.done").unlink()
+    assert engine(host).resume()
+    assert host.vms[102]["name"] == "ubuntu-02"
