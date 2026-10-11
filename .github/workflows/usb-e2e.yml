@@ -1,7 +1,8 @@
 name: USB end-to-end
 
-# Build a stick from the real, pinned Proxmox ISO and run stage 1 for real in
-# QEMU with KVM: unattended install, restart, stick boots the install, handoff.
+# Build a stick from the real, pinned Proxmox ISO and run it for real in QEMU
+# with KVM: unattended install, restart, stick boots the install, handoff, then
+# CRACKLE and POP on the host (the lab VMs run nested).
 on:
   push:
     paths:
@@ -18,7 +19,7 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 170
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +46,7 @@ jobs:
         run: docker build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
       - name: Build the USB image
         run: |
-          docker run --rm -v "$PWD:/work" snaplab-builder build examples/snap.example.yaml -o snap.img --serial-console
+          docker run --rm -v "$PWD:/work" snaplab-builder build tests/usb/e2e.yaml -o snap.img --serial-console
           sudo chown -R "$(id -u)" .snaplab-cache snap.img snap.img.sha256
       - name: Install, restart, hand off
         run: tests/usb/e2e.sh snap.img ${{ matrix.firmware }}

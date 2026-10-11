@@ -1,15 +1,17 @@
 #!/bin/bash
-# End-to-end test of stage 1 (SNAP) with the real Proxmox ISO, in QEMU with KVM.
+# End-to-end test with the real Proxmox ISO, in QEMU with KVM: stage 1 (SNAP),
+# then CRACKLE and POP on the installed host, whose lab VMs run nested.
 #
 #   tests/usb/e2e.sh snap.img bios|uefi
 #
-# Build the stick with --serial-console so the installer's output lands in the logs.
+# Build the stick from tests/usb/e2e.yaml with --serial-console so the
+# installer's and the engine's output land in the logs.
 #
 # Pass 1 boots the stick next to an empty SATA disk whose serial matches
 # examples/snap.example.yaml; the unattended install must finish and restart.
 # Pass 2 boots the stick again: its menu must detect the install and boot it,
-# and the first-boot handoff must copy the payload. The target disk is then
-# inspected with LVM on the host.
+# and the first-boot handoff must copy the payload, then CRACKLE and POP run.
+# The target disk is then inspected with LVM on the host.
 set -euo pipefail
 
 IMG="$1"
@@ -23,7 +25,7 @@ OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
 [ -e /dev/kvm ] || { echo "e2e: /dev/kvm is missing; a full install without KVM takes hours" >&2; exit 1; }
 
 cp "$IMG" "$WORK/stick.img"
-truncate -s 32G "$WORK/target.img"
+truncate -s 64G "$WORK/target.img"
 
 qemu() {
     local log="$1" limit="$2"
@@ -33,7 +35,7 @@ qemu() {
         cp "$OVMF_VARS" "$WORK/vars.fd"
         fw=(-drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE" -drive "if=pflash,format=raw,file=$WORK/vars.fd")
     fi
-    timeout "$limit" qemu-system-x86_64 -enable-kvm -cpu host -smp 2 -m 4096 \
+    timeout "$limit" qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 8192 \
         -display none -serial "file:$log" -no-reboot -pidfile "$WORK/qemu.pid" "${fw[@]}" \
         -monitor "unix:$WORK/monitor.sock,server,nowait" \
         -nic user,model=virtio-net-pci \
@@ -54,12 +56,12 @@ if ! qemu "$WORK/pass1.log" 30m; then
 fi
 echo "install finished in $(( $(date +%s) - start ))s"
 
-echo "== pass 2: boot the stick again; it must start the installed system, which runs CRACKLE"
-qemu "$WORK/pass2.log" 30m &
+echo "== pass 2: boot the stick again; it must start the installed system, which runs CRACKLE and POP"
+qemu "$WORK/pass2.log" 110m &
 result=timeout
-for _ in $(seq 1800); do
+for _ in $(seq 6600); do
     sleep 1
-    if grep -aq "SNAP: CRACKLE (host setup) done" "$WORK/pass2.log"; then result=finished; break; fi
+    if grep -aq "SNAP: POP (router, networks and lab machines) done" "$WORK/pass2.log"; then result=finished; break; fi
     if grep -aqE "SNAP: .*(failed|missing)" "$WORK/pass2.log"; then result=failed; break; fi
     [ -s "$WORK/qemu.pid" ] && ! kill -0 "$(cat "$WORK/qemu.pid")" 2>/dev/null && { result=exited; break; }
 done
@@ -75,7 +77,7 @@ if kill "$(cat "$WORK/qemu.pid" 2>/dev/null)" 2>/dev/null; then
 fi
 wait || true
 tr -d '\r' < "$WORK/pass2.log" | grep -a "SNAP" || true
-echo "CRACKLE result: $result"
+echo "CRACKLE and POP result: $result"
 
 echo "== inspect the target disk"
 loop=$(sudo losetup -f --show -P "$WORK/target.img")
@@ -86,18 +88,20 @@ mkdir -p "$WORK/mnt"
 sudo mount -o ro /dev/pve/root "$WORK/mnt"
 sudo cat "$WORK/mnt/var/log/snap/firstboot.log"
 sudo test -e "$WORK/mnt/var/lib/snap/progress/snap.done"
-sudo cmp "$WORK/mnt/var/lib/snap/snap.yaml" examples/snap.example.yaml
+sudo cmp "$WORK/mnt/var/lib/snap/snap.yaml" tests/usb/e2e.yaml
 sudo test -L "$WORK/mnt/etc/systemd/system/multi-user.target.wants/snap-resume.service"
 sudo journalctl -D "$WORK/mnt/var/log/journal" --no-pager 2>/dev/null | grep -a "SNAP:" || true
 echo "== engine log"
 sudo cat "$WORK/mnt/var/log/snap/engine.log" || true
 sudo cat "$WORK/mnt/var/lib/snap/state.json" || true
+echo "== router console"
+sudo tail -c 20000 "$WORK/mnt/var/log/snap/router-console.log" 2>/dev/null | tr -d '\r' || true
 
 grep -aq "SNAP: starting the installed Proxmox VE." "$WORK/pass2.log" || {
     echo "e2e: the stick's menu did not detect the installed system" >&2
     exit 1
 }
-[ "$result" = finished ] || { echo "e2e: CRACKLE did not finish ($result)" >&2; exit 1; }
+[ "$result" = finished ] || { echo "e2e: CRACKLE and POP did not finish ($result)" >&2; exit 1; }
 sudo test -e "$WORK/mnt/var/lib/snap/progress/crackle.done"
 # The automation tools CRACKLE installs (design decision D7).
 sudo test -x "$WORK/mnt/usr/local/bin/tofu"
@@ -105,4 +109,8 @@ sudo grep -q 'filesystem_mirror' "$WORK/mnt/root/.tofurc"
 sudo grep -A1 -E '^Package: (ansible-core|python3-httpx)$' "$WORK/mnt/var/lib/dpkg/status" | grep -c 'install ok installed' | grep -qx 2
 sudo test -d "$WORK/mnt/usr/share/ansible/collections/ansible_collections/oxlorg/opnsense"
 sudo test -s "$WORK/mnt/var/lib/snap/secrets/proxmox-api-token"
-echo "e2e: OK ($FIRMWARE): installed unattended, stick booted the install, handoff and CRACKLE complete"
+# POP: the router imported its config, and the check from inside the lab passed.
+sudo test -e "$WORK/mnt/var/lib/snap/progress/pop.done"
+sudo test -s "$WORK/mnt/var/lib/snap/pop/router-imported"
+sudo test -s "$WORK/mnt/var/lib/snap/pop/verified.sha256"
+echo "e2e: OK ($FIRMWARE): installed unattended, stick booted the install, handoff, CRACKLE and POP complete"

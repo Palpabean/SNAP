@@ -21,16 +21,16 @@ variable "vm_storage" { type = string }
 
 variable "router" {
   type = object({
-    vmid        = number
-    name        = string
-    template    = number
-    config_iso  = string # volume id of the bootstrap config ISO
-    started     = bool   # false until POP is watching the console for the importer
-    memory_mb   = number
-    cpu         = number
-    uplink      = string # bridge of the WAN card
-    admin_vlan  = number
-    lab_vlans   = list(number) # one card per lab network, in snap.yaml order; 0 = untagged
+    vmid       = number
+    name       = string
+    template   = number
+    config_iso = string # volume id of the bootstrap config ISO
+    started    = bool   # false until POP is watching the console for the importer
+    memory_mb  = number
+    cpu        = number
+    uplink     = string # bridge of the WAN card
+    admin_vlan = number
+    lab_vlans  = list(number) # one card per lab network, in snap.yaml order; 0 = untagged
   })
 }
 
