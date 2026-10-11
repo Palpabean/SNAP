@@ -7,6 +7,7 @@ the Proxmox ISO, plus a stub proxmox-auto-install-assistant. The boot tests
 also need QEMU and OVMF. CI's usb-image job installs all of them.
 """
 
+import bz2
 import json
 import os
 import select
@@ -160,6 +161,8 @@ def built(tmp_path_factory):
     stub.chmod(0o755)
     ubuntu = tmp / "mirror" / "ubuntu-24.04-server-cloudimg-amd64.img"
     ubuntu.write_bytes(b"stand-in cloud image")
+    nano = tmp / "mirror" / "OPNsense-1-nano-amd64.img.bz2"
+    nano.write_bytes(bz2.compress(b"stand-in router image"))
 
     def entry(table, path, extra=""):
         return f'[{table}]\nversion = "1"\nurl = "{path.as_uri()}"\nsha256 = "{fetch.sha256(path)}"\n{extra}'
@@ -174,6 +177,7 @@ def built(tmp_path_factory):
         f'[proxmox-ve]\nversion = "9.2-1"\nurl = "{iso.as_uri()}"\nsha256 = "{fetch.sha256(iso)}"\n'
         '[proxmox-auto-install-assistant]\nversion = "9.2.8"\n'
         + entry("ubuntu-cloud-image", ubuntu)
+        + entry("opnsense", nano)
         + entry("opentofu", tofu)
         + entry("opentofu-provider-proxmox", provider, 'source = "registry.opentofu.org/bpg/proxmox"\n')
         + '[ansible]\ndebian_packages = ["ansible-core"]\nansible_core = "2.19."\n'
@@ -412,7 +416,16 @@ def test_tools_travel_on_the_stick(built, tmp_path):
     manifest = subprocess.run(
         ["debugfs", "-R", "cat /payload.sha256", str(part)], check=True, capture_output=True, text=True
     ).stdout
-    for name in ("tools/opentofu.zip", "tools/provider-proxmox.zip", "debs/Packages", "tools.json"):
+    for name in (
+        "tools/opentofu.zip",
+        "tools/provider-proxmox.zip",
+        "debs/Packages",
+        "tools.json",
+        "images/opnsense-nano-amd64.img.bz2",
+        "lib/snaplab/stages/pop/tofu/main.tf",
+        "lib/snaplab/stages/pop/ansible/router.yml",
+        "lib/snaplab/stages/pop/ansible/verify.yml",
+    ):
         assert name in manifest
     assert "collections/oxlorg-opnsense-1.tar.gz" in manifest
     tools_json = json.loads(

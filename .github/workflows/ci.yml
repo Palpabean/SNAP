@@ -67,3 +67,33 @@ jobs:
       - run: pytest -v -rs tests/test_usb_build.py
         env:
           SNAPLAB_TEST_LVM: "1"
+
+  # The OpenTofu configuration and Ansible playbooks POP hands to the host,
+  # checked against the pinned provider and collection (Design 0001, section 12).
+  pop-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the pinned OpenTofu
+        run: |
+          url=$(python3 -c 'import tomllib; print(tomllib.load(open("checksums.lock", "rb"))["opentofu"]["url"])')
+          sha=$(python3 -c 'import tomllib; print(tomllib.load(open("checksums.lock", "rb"))["opentofu"]["sha256"])')
+          curl -fsSL -o tofu.zip "$url"
+          echo "$sha  tofu.zip" | sha256sum -c -
+          unzip -q tofu.zip tofu -d "$RUNNER_TEMP" && echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: tofu validate
+        working-directory: snaplab/stages/pop/tofu
+        run: |
+          tofu init -backend=false -input=false
+          tofu validate
+          tofu fmt -check -diff
+      - name: Ansible syntax check
+        run: |
+          pip install -q ansible-core httpx
+          ansible-galaxy collection install oxlorg.opnsense:==26.1.11
+          ansible-playbook --syntax-check snaplab/stages/pop/ansible/router.yml
+          printf '[lab]\n' > inventory.ini
+          ansible-playbook --syntax-check -i inventory.ini snaplab/stages/pop/ansible/verify.yml

@@ -26,6 +26,7 @@ include = ["snaplab*"]
 [tool.setuptools.package-data]
 "snaplab.core.schema" = ["*.json"]
 "snaplab.stages.snap" = ["*.sh"]
+"snaplab.stages.pop" = ["tofu/*.tf", "ansible/*.yml"]
 "snaplab.delivery.usb" = ["*.cfg", "*.sh", "Containerfile", "theme/*.txt", "theme/*.png"]
 
 [tool.ruff]

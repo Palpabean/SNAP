@@ -1,0 +1,40 @@
+# POP, last step: check the lab from inside (Design 0001, section 7.3, step 6).
+# Each machine got its address from the router, reaches the router, resolves
+# names through it, and reaches other networks only as its policy allows.
+#
+#   ansible-playbook -i inventory.ini verify.yml -e @verify.json
+- name: Lab machines
+  hosts: lab
+  gather_facts: false
+  tasks:
+    - name: The machine is up (cloud-init can take a few minutes)
+      ansible.builtin.wait_for_connection:
+        timeout: 900
+
+    - name: Wait for cloud-init to finish
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+      failed_when: false
+
+    - name: It has its reserved address from the router's DHCP
+      ansible.builtin.command: ip -4 -o addr show scope global
+      register: addresses
+      changed_when: false
+      failed_when: (ansible_host ~ '/') not in addresses.stdout
+
+    - name: It reaches the router
+      ansible.builtin.command: ping -c 2 -W 2 {{ router }}
+      changed_when: false
+
+    - name: The router answers DNS
+      ansible.builtin.command: getent hosts router.{{ domain }}
+      changed_when: false
+
+    - name: Other networks are reachable only where the policy allows
+      ansible.builtin.command: ping -c 2 -W 2 {{ item.address }}
+      register: reach
+      changed_when: false
+      failed_when: (reach.rc == 0) != item.reachable
+      loop: "{{ expect }}"
+      loop_control:
+        label: "{{ item.network }} ({{ 'allowed' if item.reachable else 'blocked' }})"

@@ -18,9 +18,10 @@ import sys
 from snaplab.core.engine import LOG_FILE, STATE_DIR, Context, Engine
 from snaplab.core.host import Host
 from snaplab.stages.crackle.stage import STAGE as CRACKLE
+from snaplab.stages.pop.stage import STAGE as POP
 
-STAGES = [CRACKLE]
-NEXT = "POP (router, networks and test VMs) is not built yet (milestone M3)."
+STAGES = [CRACKLE, POP]
+NEXT = "BANG (final checks and the summary) is not built yet (milestone M4)."
 
 
 def console(message: str) -> None:

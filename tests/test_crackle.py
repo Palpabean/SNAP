@@ -172,12 +172,13 @@ def test_legacy_list_sources_are_commented_out(pve):
 
 def test_status_and_cli(pve, capsys, monkeypatch):
     monkeypatch.setattr(hostcli, "console", lambda m: print(m))
+    monkeypatch.setattr(hostcli, "STAGES", [crackle.STAGE])  # POP has its own tests
     pve.write("/var/lib/snap/snap.json", "{}")
     assert hostcli.main(["status"], host=pve) == 0
     assert "CRACKLE (host setup): pending" in capsys.readouterr().out
     assert hostcli.main(["resume"], host=pve) == 0
     out = capsys.readouterr().out
-    assert "SNAP: CRACKLE (host setup) done" in out and "POP" in out
+    assert "SNAP: CRACKLE (host setup) done" in out and "BANG" in out
     assert hostcli.main(["status"], host=pve) == 0
     assert "  - Create the Ubuntu 24.04 VM template: done" in capsys.readouterr().out
     assert hostcli.main(["logs"], host=pve) == 0

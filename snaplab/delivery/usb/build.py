@@ -29,6 +29,9 @@ from snaplab.stages.snap import answer
 ASSISTANT = "proxmox-auto-install-assistant"
 TOOLS = [ASSISTANT, "xorriso", "mkfs.ext4", "sfdisk", "apt-get", "dpkg-deb"]
 REPO_LOCK = Path(__file__).resolve().parents[3] / "checksums.lock"
+# What of the package goes on the stick for the host: the engine and the files
+# the stages hand to OpenTofu and Ansible.
+ENGINE_FILES = ["*.py", "*.tf", "*.yml"]
 
 
 class BuildError(Exception):
@@ -109,7 +112,8 @@ def make_payload(config_path: Path, cfg: dict, files: dict[str, Path], dest: Pat
     """The SNAPDATA contents, copied to /var/lib/snap on the host at first boot.
 
     snap.yaml (as written) and snap.json (validated, for the host, which has no
-    YAML library), the engine (lib/snaplab, bin/snap), `files` (payload path to
+    YAML library), the engine (lib/snaplab with its OpenTofu and Ansible files,
+    bin/snap), `files` (payload path to
     source: VM images, tool archives, Debian packages), tools.json describing
     the bundled tools, and a checksum manifest over everything.
     """
@@ -120,7 +124,8 @@ def make_payload(config_path: Path, cfg: dict, files: dict[str, Path], dest: Pat
     command.write_bytes(_asset("snaplab.delivery.usb", "snap-host.sh"))
     command.chmod(0o755)
     package = Path(snaplab.__file__).parent
-    for src in package.rglob("*.py"):
+    engine_files = [p for pattern in ENGINE_FILES for p in package.rglob(pattern)]
+    for src in engine_files:
         target = dest / "lib" / "snaplab" / src.relative_to(package)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, target)
@@ -140,6 +145,9 @@ def bundle_lab_files(lock: dict, cache: Path, log=print) -> tuple[dict[str, Path
     files["images/ubuntu-24.04-server-cloudimg-amd64.img"] = fetch.fetch(
         ubuntu["url"], ubuntu["sha256"], cache, log=log
     )
+
+    opn = lock["opnsense"]
+    files["images/opnsense-nano-amd64.img.bz2"] = fetch.fetch(opn["url"], opn["sha256"], cache, log=log)
 
     tofu, provider = lock["opentofu"], lock["opentofu-provider-proxmox"]
     files["tools/opentofu.zip"] = fetch.fetch(tofu["url"], tofu["sha256"], cache, log=log)

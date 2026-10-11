@@ -1,0 +1,82 @@
+# POP: configure the lab router through its API (Design 0001, D2 and D7).
+# The variables come from snaplab.stages.pop.lab.router_vars (router.json)
+# and the API key POP put in the bootstrap config (api.json):
+#
+#   ansible-playbook router.yml -e @router.json -e @api.json
+- name: Lab router (OPNsense)
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/oxlorg.opnsense.all:
+      firewall: "{{ opnsense_host }}"
+      api_key: "{{ opnsense_key }}"
+      api_secret: "{{ opnsense_secret }}"
+      ssl_verify: false
+  tasks:
+    - name: Address ranges
+      oxlorg.opnsense.alias:
+        name: "{{ item.name }}"
+        type: network
+        content: "{{ item.content }}"
+        description: "{{ item.description }}"
+      loop: "{{ aliases }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Firewall rules
+      oxlorg.opnsense.rule:
+        sequence: "{{ item.sequence }}"
+        interface: ["{{ item.interface }}"]
+        action: "{{ item.action }}"
+        protocol: "{{ item.protocol }}"
+        destination_net: "{{ item.destination_net }}"
+        destination_invert: "{{ item.destination_invert }}"
+        destination_port: "{{ item.destination_port }}"
+        source_net: "{{ item.interface }}"
+        description: "{{ item.description }}"
+        match_fields: [description]
+        log: false
+        reload: false
+      loop: "{{ rules }}"
+      loop_control:
+        label: "{{ item.description }}"
+
+    - name: Apply the address ranges and firewall rules
+      oxlorg.opnsense.reload:
+        target: "{{ item }}"
+      loop: [alias, rule]
+
+    - name: DHCP server
+      oxlorg.opnsense.dhcp_general:
+        enabled: "{{ dhcp_interfaces | length > 0 }}"
+        interfaces: "{{ dhcp_interfaces }}"
+        reload: false
+
+    - name: DHCP ranges
+      oxlorg.opnsense.dhcp_subnet:
+        subnet: "{{ item.subnet }}"
+        pools: ["{{ item.pool }}"]
+        gateway: ["{{ item.gateway }}"]
+        dns: "{{ item.dns }}"
+        auto_options: false
+        description: "{{ item.description }}"
+        reload: false
+      loop: "{{ dhcp_subnets }}"
+      loop_control:
+        label: "{{ item.subnet }}"
+
+    - name: Fixed addresses for the lab machines
+      oxlorg.opnsense.dhcp_reservation:
+        ip: "{{ item.ip }}"
+        mac: "{{ item.mac }}"
+        subnet: "{{ item.subnet }}"
+        hostname: "{{ item.hostname }}"
+        description: "SNAP: {{ item.hostname }}"
+        reload: false
+      loop: "{{ dhcp_reservations }}"
+      loop_control:
+        label: "{{ item.hostname }}"
+
+    - name: Apply the DHCP settings
+      oxlorg.opnsense.reload:
+        target: dhcp
