@@ -70,7 +70,9 @@ for _ in $(seq 180); do
     kill -0 "$(cat "$WORK/qemu.pid")" 2>/dev/null || break
     sleep 1
 done
-kill "$(cat "$WORK/qemu.pid")" 2>/dev/null && echo "e2e: the host did not power off within 3 minutes; stopped it" || true
+if kill "$(cat "$WORK/qemu.pid" 2>/dev/null)" 2>/dev/null; then
+    echo "e2e: the host did not power off within 3 minutes; stopped it"
+fi
 wait || true
 tr -d '\r' < "$WORK/pass2.log" | grep -a "SNAP" || true
 echo "CRACKLE result: $result"
