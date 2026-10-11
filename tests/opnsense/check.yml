@@ -1,0 +1,28 @@
+# D2 spike, second half: Ansible manages the imported OPNsense through its API
+# with oxlorg.opnsense, the way POP does. Run after spike.py --keep-running.
+- name: OPNsense answers Ansible
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/oxlorg.opnsense.all:
+      firewall: 127.0.0.1
+      api_port: 8443
+      api_key: "{{ lookup('env', 'OPNSENSE_KEY') }}"
+      api_secret: "{{ lookup('env', 'OPNSENSE_SECRET') }}"
+      ssl_verify: false
+  tasks:
+    - name: Create an alias
+      oxlorg.opnsense.alias:
+        name: snap_spike
+        content: [10.10.10.0/24]
+        type: network
+        description: SNAP D2 spike
+
+    - name: Read it back
+      oxlorg.opnsense.list:
+        target: alias
+      register: aliases
+
+    - name: The alias is there
+      ansible.builtin.assert:
+        that: "'snap_spike' in (aliases.data | map(attribute='name') | list)"

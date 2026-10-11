@@ -1,0 +1,71 @@
+name: OPNsense import spike
+
+# Design 0001, D2: boot the OPNsense nano image in QEMU with SNAP's bootstrap
+# config.xml on an ISO, answer the first-boot importer over the serial console,
+# then manage it through the API with Ansible (oxlorg.opnsense).
+on:
+  push:
+    paths:
+      - "snaplab/stages/pop/**"
+      - "tests/opnsense/**"
+      - ".github/workflows/opnsense-spike.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OPNSENSE: "26.1"
+  COLLECTION: "26.1.11"
+
+jobs:
+  spike:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install QEMU and xorriso
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils xorriso
+      - name: Install snaplab and Ansible
+        run: |
+          pip install -q -e . ansible-core httpx
+          ansible-galaxy collection install "oxlorg.opnsense:==${COLLECTION}"
+      - name: Download the OPNsense nano image
+        run: |
+          set -eu
+          name="OPNsense-${OPNSENSE}-nano-amd64.img.bz2"
+          for mirror in https://pkg.opnsense.org/releases https://mirror.ams1.nl.leaseweb.net/opnsense/releases https://mirror.dns-root.de/opnsense/releases; do
+            if curl -fsSL --retry 3 -o checksums "$mirror/$OPNSENSE/OPNsense-${OPNSENSE}-checksums-amd64.sha256" \
+               && curl -fsSL --retry 3 -o "$name" "$mirror/$OPNSENSE/$name"; then
+              echo "url=$mirror/$OPNSENSE/$name"
+              break
+            fi
+          done
+          cat checksums
+          sha256sum "$name"
+          grep -F "($name)" checksums | grep -qi "$(sha256sum "$name" | cut -d' ' -f1)"
+          bunzip2 -k "$name"
+          qemu-img info "${name%.bz2}"
+      - name: Import the config unattended and reach the API
+        run: python tests/opnsense/spike.py "OPNsense-${OPNSENSE}-nano-amd64.img" work --keep-running
+      - name: Manage it with Ansible
+        run: |
+          set -a; . work/api.env; set +a
+          ansible-playbook tests/opnsense/check.yml
+      - name: Keep the serial log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opnsense-serial-log
+          path: work/opnsense-serial.log
+          if-no-files-found: ignore
