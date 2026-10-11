@@ -29,6 +29,13 @@ ADMIN_CIDR = ipaddress.IPv4Network("172.31.255.0/29")
 ADMIN_ROUTER = ADMIN_CIDR.network_address + 1
 ADMIN_HOST = ADMIN_CIDR.network_address + 2
 
+
+def admin(cfg: dict[str, Any]) -> tuple[ipaddress.IPv4Network, ipaddress.IPv4Address, ipaddress.IPv4Address]:
+    """The admin network as placed for this lab (moved if it clashed): network, router, host."""
+    net = ipaddress.IPv4Network(cfg.get("admin_network", str(ADMIN_CIDR)))
+    return net, net.network_address + 1, net.network_address + 2
+
+
 IMPORTER_PROMPT = "Press any key to start the configuration importer"
 DEVICE_PROMPT = "Select device to import from"
 IMPORTED = "Restoring config.xml...done."
@@ -82,6 +89,7 @@ def render_config(cfg: dict[str, Any], api_key: str, api_secret_hash: str) -> st
     $5$, which both Proxmox and OPNsense accept).
     """
     host = cfg["host"]
+    admin_net, admin_router, _ = admin(cfg)
     root = ET.Element("opnsense")
     _add(root, "theme", "opnsense")
 
@@ -116,8 +124,8 @@ def render_config(cfg: dict[str, Any], api_key: str, api_secret_hash: str) -> st
             _add(el, "ipaddr", "dhcp")
             _add(el, "blockbogons", "1")
         elif iface.key == "opt1":
-            _add(el, "ipaddr", str(ADMIN_ROUTER))
-            _add(el, "subnet", str(ADMIN_CIDR.prefixlen))
+            _add(el, "ipaddr", str(admin_router))
+            _add(el, "subnet", str(admin_net.prefixlen))
             _rule(filt, "opt1", "SNAP: the Proxmox host reaches the OPNsense API", "(self)", "tcp", "443")
             _rule(filt, "opt1", "SNAP: the Proxmox host pings the router", "(self)", "icmp")
         else:

@@ -1,4 +1,5 @@
 import bz2
+import ipaddress
 import json
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from snaplab.core import config
 from snaplab.core.engine import PROGRESS_DIR, Context, Engine
 from snaplab.core.host import CommandError
 from snaplab.stages.crackle import tools as crackle_tools
-from snaplab.stages.pop import lab, network, opnsense
+from snaplab.stages.pop import addresses, lab, network, opnsense
 from snaplab.stages.pop import stage as pop
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "snap.example.yaml"
@@ -130,6 +131,7 @@ class FakeLab(FakeProxmox):
         self.running: set[int] = set()
         self.playbooks: list[str] = []
         self.routes: set[str] = set()
+        self.home = "192.168.1.0/24"  # the network vmbr0 is on
         self.write("/etc/network/interfaces", "auto lo\niface lo inet loopback\n")
         self.write("/var/run/qemu-server/.keep", "")
 
@@ -165,8 +167,16 @@ class FakeLab(FakeProxmox):
             text = self.read(network.CONFIG) or ""
             self.routes = {line.split()[4] for line in text.splitlines() if "ip route replace" in line}
             return ""
+        if tool == "ip" and args[:2] == ("-j", "-4"):
+            home = ipaddress.IPv4Network(self.home)
+            if args[2] == "addr":
+                local = {"family": "inet", "local": str(home.network_address + 50), "prefixlen": home.prefixlen}
+                return json.dumps([{"ifname": "lo", "addr_info": []}, {"ifname": "vmbr0", "addr_info": [local]}])
+            return json.dumps([{"dst": "default", "dev": "vmbr0"}, {"dst": str(home), "dev": "vmbr0"}])
         if tool == "ip" and args[:4] == ("-4", "route", "show", "dev"):
-            return "".join(f"{r} via {opnsense.ADMIN_ROUTER} dev {network.IFACE}\n" for r in sorted(self.routes))
+            placed = json.loads(self.read(addresses.PLAN_FILE))["placed"]
+            router = ipaddress.IPv4Network(placed["admin"]).network_address + 1
+            return "".join(f"{r} via {router} dev {network.IFACE}\n" for r in sorted(self.routes))
         if tool == "ip" and args[:2] == ("link", "show") and args[2] == network.IFACE:
             return "" if self.routes else None
         if tool == crackle_tools.TOFU:
@@ -197,7 +207,7 @@ class FakeLab(FakeProxmox):
         return ""
 
     def http_ok(self, url, headers):
-        if url == pop.API_STATUS:
+        if url.endswith("/api/core/firmware/status"):
             return lab.ROUTER_VMID in self.running and self.exists(pop.IMPORTED)
         return super().http_ok(url, headers)
 
@@ -330,3 +340,92 @@ def test_a_lost_machine_is_recreated(host):
     host.path(f"{PROGRESS_DIR}/pop.done").unlink()
     assert engine(host).resume()
     assert host.vms[102]["name"] == "ubuntu-02"
+
+
+# --- addresses that clash with the network the host is on ---------------------
+
+
+def test_free_ranges_stay_where_they_are(cfg):
+    placed = addresses.plan(cfg, [ipaddress.IPv4Network("192.168.1.0/24")])
+    assert placed == {"networks": {"lab": "10.10.10.0/24", "services": "10.10.20.0/24"}, "admin": "172.31.255.0/29"}
+    assert addresses.describe(cfg, placed) == []
+
+
+def test_clashing_lab_network_moves_with_its_router_dhcp_and_rules(cfg):
+    cfg["networks"][1]["rules"] = [{"action": "allow", "to": "10.10.10.0/24"}]
+    busy = [ipaddress.IPv4Network("10.10.10.0/24")]  # the home network uses the lab's range
+    placed = addresses.plan(cfg, busy)
+    assert placed["networks"] == {"lab": "10.10.11.0/24", "services": "10.10.20.0/24"}
+    moved = addresses.apply(cfg, placed)
+    lab_net = moved["networks"][0]
+    assert (lab_net["router"], lab_net["dhcp"]["start"], lab_net["dhcp"]["end"]) == (
+        "10.10.11.1",
+        "10.10.11.100",
+        "10.10.11.199",
+    )
+    assert moved["networks"][1]["rules"][0]["to"] == "10.10.11.0/24"
+    assert cfg["networks"][0]["cidr"] == "10.10.10.0/24"  # the original is untouched
+    assert "using 10.10.11.0/24 instead of 10.10.10.0/24" in addresses.describe(cfg, placed)[0]
+
+
+def test_a_big_home_network_pushes_the_lab_elsewhere(cfg):
+    placed = addresses.plan(cfg, [ipaddress.IPv4Network("10.0.0.0/8")])
+    assert placed["networks"] == {"lab": "172.16.0.0/24", "services": "172.16.1.0/24"}
+
+
+def test_admin_network_moves_when_taken(cfg):
+    placed = addresses.plan(cfg, [ipaddress.IPv4Network("172.31.0.0/16")])
+    assert placed["admin"] == "172.16.0.0/29"
+    moved = addresses.apply(cfg, placed)
+    assert opnsense.admin(moved)[1] == ipaddress.IPv4Address("172.16.0.1")
+    assert "address 172.16.0.2/29" in network.render(moved)
+    assert lab.firewall_rules(moved)[0]["destination_net"] == "172.16.0.0/29"
+
+
+def test_lab_networks_avoid_each_other_when_moving(cfg):
+    cfg["networks"][1].update(cidr="10.10.11.0/24", router="10.10.11.1")
+    cfg["networks"][1]["dhcp"].update(start="10.10.11.100", end="10.10.11.199")
+    placed = addresses.plan(cfg, [ipaddress.IPv4Network("10.10.10.0/24")])
+    assert placed["networks"] == {"lab": "10.10.12.0/24", "services": "10.10.11.0/24"}
+
+
+def test_host_networks_are_read_from_ip(cfg):
+    addr = json.dumps(
+        [
+            {"ifname": "lo", "addr_info": [{"family": "inet", "local": "127.0.0.1", "prefixlen": 8}]},
+            {"ifname": "vmbr0", "addr_info": [{"family": "inet", "local": "10.10.10.7", "prefixlen": 24}]},
+            {"ifname": "vmbr1.4094", "addr_info": [{"family": "inet", "local": "172.31.255.2", "prefixlen": 29}]},
+        ]
+    )
+    route = json.dumps(
+        [
+            {"dst": "default", "dev": "vmbr0"},
+            {"dst": "10.20.0.0/16", "dev": "vmbr0"},
+            {"dst": "10.10.20.0/24", "dev": "vmbr1.4094"},  # SNAP's own route to the lab
+        ]
+    )
+    assert addresses.taken(addr, route) == [
+        ipaddress.IPv4Network("10.10.10.0/24"),
+        ipaddress.IPv4Network("10.20.0.0/16"),
+    ]
+
+
+def test_pop_moves_the_lab_off_the_home_network(host):
+    host.home = "10.10.10.0/24"
+    messages = []
+    assert engine(host, messages).resume(), messages
+    assert any("using 10.10.11.0/24 instead of 10.10.10.0/24" in m for m in messages)
+    assert host.routes == {"10.10.11.0/24", "10.10.20.0/24"}
+    reservations = json.loads(host.read(f"{pop.ANSIBLE_DIR}/router.json"))["dhcp_reservations"]
+    assert reservations[0]["ip"] == "10.10.11.100"
+    # Later runs keep the placement, even if the home network changes.
+    host.home = "192.168.1.0/24"
+    host.path(f"{PROGRESS_DIR}/pop.done").unlink()
+    assert engine(host).resume()
+    assert host.routes == {"10.10.11.0/24", "10.10.20.0/24"}
+
+
+def test_admin_network_moves_for_a_lab_network_in_its_range(cfg):
+    cfg["networks"][0].update(cidr="172.31.255.0/24", router="172.31.255.1")
+    placed = addresses.plan(cfg, [])
+    assert placed["networks"]["lab"] == "172.31.255.0/24" and placed["admin"] == "172.16.0.0/29"

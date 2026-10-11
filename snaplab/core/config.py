@@ -17,8 +17,9 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 
-# The admin network between the Proxmox host and the router (D8) must stay free.
-from snaplab.stages.pop.opnsense import ADMIN_CIDR, ADMIN_VLAN
+# The admin network's VLAN on the lab bridge (D8) must stay free; its address
+# range moves by itself if a lab network takes it (stages/pop/addresses.py).
+from snaplab.stages.pop.opnsense import ADMIN_VLAN
 
 SCHEMA_VERSION = 1
 
@@ -119,8 +120,6 @@ def _check_networks(networks: list[dict[str, Any]]) -> list[str]:
         if cidr.prefixlen > 29:
             errors.append(f"{where}.cidr: /{cidr.prefixlen} is too small for a router and machines; use /29 or larger")
             continue
-        if cidr.overlaps(ADMIN_CIDR):
-            errors.append(f"{where}.cidr: {cidr} overlaps SNAP's admin network {ADMIN_CIDR}")
         parsed.append((name, cidr))
 
         hosts = (cidr.network_address, cidr.broadcast_address)

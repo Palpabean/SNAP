@@ -14,7 +14,7 @@ import hashlib
 import ipaddress
 from typing import Any
 
-from snaplab.stages.pop.opnsense import ADMIN_CIDR, ADMIN_VLAN, interfaces
+from snaplab.stages.pop.opnsense import ADMIN_VLAN, admin, interfaces
 
 ROUTER_VMID = 100
 ROUTER_NAME = "snap-router"
@@ -120,7 +120,7 @@ def firewall_rules(cfg: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         key, name = iface.key, net["name"]
         rules.append(
-            _rule(seq, key, f"{name} may not reach the admin network", "block", destination_net=str(ADMIN_CIDR))
+            _rule(seq, key, f"{name} may not reach the admin network", "block", destination_net=str(admin(cfg)[0]))
         )  # noqa: E501
         # Only the router's own address on this network: "(self)" would also open its
         # addresses on the other networks.

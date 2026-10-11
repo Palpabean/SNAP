@@ -144,11 +144,11 @@ def test_admin_vlan_is_reserved(cfg):
     assert "reserved for SNAP's admin network" in errors_for(cfg)
 
 
-def test_admin_network_is_kept_free(cfg):
-    cfg["networks"][0].update(cidr="172.31.0.0/16", router="172.31.0.1")
-    cfg["networks"][0]["dhcp"].update(start="172.31.0.100", end="172.31.0.199")
-    cfg["networks"][0].pop("rules")
-    assert "overlaps SNAP's admin network" in errors_for(cfg)
+def test_lab_may_use_the_admin_range(cfg):
+    # The admin network moves out of the way on the host instead (stages/pop/addresses.py).
+    cfg["networks"][0].update(cidr="172.31.255.0/24", router="172.31.255.1")
+    cfg["networks"][0]["dhcp"].update(start="172.31.255.100", end="172.31.255.199")
+    assert config.validate(cfg) == []
 
 
 def test_root_hash_must_suit_the_router(cfg):

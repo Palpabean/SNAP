@@ -18,7 +18,7 @@ import time
 from snaplab.core.engine import Context, Stage, Step
 from snaplab.stages.crackle import tools as crackle_tools
 from snaplab.stages.crackle.stage import UBUNTU_VMID, VM_STORAGE
-from snaplab.stages.pop import lab, network, opnsense
+from snaplab.stages.pop import addresses, lab, network, opnsense
 
 OPNSENSE_VMID = 9001
 OPNSENSE_NAME = "snap-opnsense-261"
@@ -32,13 +32,21 @@ SSH_KEY = "/root/.ssh/snap_lab_ed25519"
 CONFIG_ISO = "/var/lib/vz/template/iso/snap-router-config.iso"
 IMPORTED = f"{WORK}/router-imported"
 CONSOLE_LOG = "/var/log/snap/router-console.log"
-API_STATUS = f"https://{opnsense.ADMIN_ROUTER}/api/core/firmware/status"
 
 # Run the tools as root with a predictable environment: the resume service has no HOME.
 ENV = [
     "env", "HOME=/root", "TF_IN_AUTOMATION=1", f"TF_CLI_CONFIG_FILE={crackle_tools.TOFU_CONFIG}",
     "ANSIBLE_HOST_KEY_CHECKING=False", "ANSIBLE_NOCOLOR=1", "ANSIBLE_RETRY_FILES_ENABLED=False",
 ]  # fmt: skip
+
+
+def _cfg(ctx: Context) -> dict:
+    """snap.yaml with the lab's addresses as placed on this host (step 1)."""
+    return addresses.lab_cfg(ctx)
+
+
+def api_status_url(cfg: dict) -> str:
+    return f"https://{opnsense.admin(cfg)[1]}/api/core/firmware/status"
 
 
 def _source(ctx: Context, *parts: str) -> str:
@@ -138,7 +146,7 @@ def make_router_config(ctx: Context) -> None:
     hashed = ctx.host.run("openssl", "passwd", "-6", "-stdin", input=api["secret"]).strip()
     staging = f"{WORK}/iso"
     ctx.host.mkdir(f"{staging}/conf", mode=0o700)
-    ctx.host.write(f"{staging}/conf/config.xml", opnsense.render_config(ctx.cfg, api["key"], hashed), mode=0o600)
+    ctx.host.write(f"{staging}/conf/config.xml", opnsense.render_config(_cfg(ctx), api["key"], hashed), mode=0o600)
     ctx.host.mkdir("/var/lib/vz/template/iso")
     _make_iso(ctx, f"{staging}", CONFIG_ISO)
     ctx.host.remove(f"{staging}/conf/config.xml")
@@ -159,7 +167,7 @@ def _tofu(ctx: Context, router_started: bool, *args: str) -> None:
     """Write the configuration and variables, initialise (offline), then run tofu with args."""
     ctx.host.mkdir(TOFU_DIR, mode=0o700)
     ctx.host.write(f"{TOFU_DIR}/main.tf", ctx.host.read(_source(ctx, "stages", "pop", "tofu", "main.tf")) or "")
-    variables = lab.tofu_vars(ctx.cfg, ctx.node, _templates(), router_started, extra_keys=_ssh_keys(ctx))
+    variables = lab.tofu_vars(_cfg(ctx), ctx.node, _templates(), router_started, extra_keys=_ssh_keys(ctx))
     ctx.host.write(f"{TOFU_DIR}/lab.auto.tfvars.json", json.dumps(variables, indent=2) + "\n", mode=0o600)
     tofu = [*ENV, crackle_tools.TOFU, f"-chdir={TOFU_DIR}"]
     if not ctx.host.exists(f"{TOFU_DIR}/.terraform.lock.hcl"):
@@ -172,7 +180,7 @@ def router_ready(ctx: Context) -> bool:
     if api is None:
         return False
     token = base64.b64encode(f"{api['key']}:{api['secret']}".encode()).decode()
-    return ctx.host.http_ok(API_STATUS, {"Authorization": f"Basic {token}"})
+    return ctx.host.http_ok(api_status_url(_cfg(ctx)), {"Authorization": f"Basic {token}"})
 
 
 def wait_for_router(ctx: Context, timeout: float = 900, interval: float = 10) -> None:
@@ -226,7 +234,7 @@ def _playbook(ctx: Context, name: str, *args: str) -> None:
 
 
 def _router_vars(ctx: Context) -> dict:
-    return lab.router_vars(ctx.cfg)
+    return lab.router_vars(_cfg(ctx))
 
 
 def router_settings_done(ctx: Context) -> bool:
@@ -237,7 +245,7 @@ def apply_router_settings(ctx: Context) -> None:
     variables = _router_vars(ctx)
     api = _api(ctx)
     credentials = {
-        "opnsense_host": str(opnsense.ADMIN_ROUTER),
+        "opnsense_host": str(opnsense.admin(_cfg(ctx))[1]),
         "opnsense_key": api["key"],
         "opnsense_secret": api["secret"],
     }
@@ -252,7 +260,7 @@ def apply_router_settings(ctx: Context) -> None:
 
 
 def _tofu_digest(ctx: Context) -> str:
-    variables = lab.tofu_vars(ctx.cfg, ctx.node, _templates(), True, extra_keys=_ssh_keys(ctx))
+    variables = lab.tofu_vars(_cfg(ctx), ctx.node, _templates(), True, extra_keys=_ssh_keys(ctx))
     main = ctx.host.read(_source(ctx, "stages", "pop", "tofu", "main.tf")) or ""
     return _digest([variables, main])
 
@@ -265,7 +273,7 @@ def machines_done(ctx: Context) -> bool:
     """
     if (ctx.host.read(f"{WORK}/machines.sha256") or "").strip() != _tofu_digest(ctx):
         return False
-    return all(_vm_config(ctx, m["vmid"]) is not None for m in lab.machines(ctx.cfg))
+    return all(_vm_config(ctx, m["vmid"]) is not None for m in lab.machines(_cfg(ctx)))
 
 
 def make_machines(ctx: Context) -> None:
@@ -277,7 +285,7 @@ def make_machines(ctx: Context) -> None:
 
 
 def _verify_vars(ctx: Context) -> dict:
-    return lab.verify_vars(ctx.cfg) | {"domain": ctx.cfg["host"]["domain"]}
+    return lab.verify_vars(_cfg(ctx)) | {"domain": ctx.cfg["host"]["domain"]}
 
 
 def _verified_digest(ctx: Context, variables: dict) -> str:
@@ -326,6 +334,7 @@ STAGE = Stage(
     title="POP (router, networks and lab machines)",
     preflight=preflight,
     steps=[
+        Step("addresses", "Choose lab addresses that do not clash with this network", addresses.done, addresses.choose),
         Step("opnsense-template", "Create the OPNsense router template", template_done, make_template),
         Step("admin-network", f"Connect the host to the admin network ({network.IFACE})", network.done, network.apply),
         Step("ssh-key", "Create the SSH key Ansible uses", ssh_key_done, make_ssh_key),
