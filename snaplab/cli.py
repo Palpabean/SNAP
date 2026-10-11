@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         except (build.BuildError, fetch.FetchError, image.ImageError) as e:
             print(f"build failed: {e}", file=sys.stderr)
             return 1
-        print(f"Write it to a USB stick of 2 GB or more, for example: sudo dd if={out.name} of=/dev/sdX bs=4M")
+        print(f"Write it to a USB stick of 4 GB or more, for example: sudo dd if={out.name} of=/dev/sdX bs=4M")
     elif args.command == "answer":
         text = answer.render(cfg)
         if args.output:

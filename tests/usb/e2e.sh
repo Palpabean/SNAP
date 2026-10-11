@@ -34,7 +34,8 @@ qemu() {
         fw=(-drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE" -drive "if=pflash,format=raw,file=$WORK/vars.fd")
     fi
     timeout "$limit" qemu-system-x86_64 -enable-kvm -cpu host -smp 2 -m 4096 \
-        -display none -serial "file:$log" -no-reboot "${fw[@]}" \
+        -display none -serial "file:$log" -no-reboot -pidfile "$WORK/qemu.pid" "${fw[@]}" \
+        -monitor "unix:$WORK/monitor.sock,server,nowait" \
         -nic user,model=virtio-net-pci \
         -device qemu-xhci -drive "file=$WORK/stick.img,format=raw,if=none,id=stick" \
         -device usb-storage,drive=stick,bootindex=0 \
@@ -53,13 +54,28 @@ if ! qemu "$WORK/pass1.log" 30m; then
 fi
 echo "install finished in $(( $(date +%s) - start ))s"
 
-echo "== pass 2: boot the stick again, expect it to start the installed system"
-qemu "$WORK/pass2.log" 6m || true    # the installed system keeps running; stop it after the handoff
+echo "== pass 2: boot the stick again; it must start the installed system, which runs CRACKLE"
+qemu "$WORK/pass2.log" 30m &
+result=timeout
+for _ in $(seq 1800); do
+    sleep 1
+    if grep -aq "SNAP: CRACKLE (host setup) done" "$WORK/pass2.log"; then result=finished; break; fi
+    if grep -aqE "SNAP: .*(failed|missing)" "$WORK/pass2.log"; then result=failed; break; fi
+    [ -s "$WORK/qemu.pid" ] && ! kill -0 "$(cat "$WORK/qemu.pid")" 2>/dev/null && { result=exited; break; }
+done
+# Shut the host down cleanly (ACPI power button), so everything it wrote reaches the disk.
+python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"system_powerdown\n")' \
+    "$WORK/monitor.sock" 2>/dev/null || true
+for _ in $(seq 180); do
+    kill -0 "$(cat "$WORK/qemu.pid")" 2>/dev/null || break
+    sleep 1
+done
+if kill "$(cat "$WORK/qemu.pid" 2>/dev/null)" 2>/dev/null; then
+    echo "e2e: the host did not power off within 3 minutes; stopped it"
+fi
+wait || true
 tr -d '\r' < "$WORK/pass2.log" | grep -a "SNAP" || true
-grep -aq "SNAP: starting the installed Proxmox VE." "$WORK/pass2.log" || {
-    echo "e2e: the stick's menu did not detect the installed system" >&2
-    exit 1
-}
+echo "CRACKLE result: $result"
 
 echo "== inspect the target disk"
 loop=$(sudo losetup -f --show -P "$WORK/target.img")
@@ -73,4 +89,20 @@ sudo test -e "$WORK/mnt/var/lib/snap/progress/snap.done"
 sudo cmp "$WORK/mnt/var/lib/snap/snap.yaml" examples/snap.example.yaml
 sudo test -L "$WORK/mnt/etc/systemd/system/multi-user.target.wants/snap-resume.service"
 sudo journalctl -D "$WORK/mnt/var/log/journal" --no-pager 2>/dev/null | grep -a "SNAP:" || true
-echo "e2e: OK ($FIRMWARE): installed unattended, stick booted the install, handoff complete"
+echo "== engine log"
+sudo cat "$WORK/mnt/var/log/snap/engine.log" || true
+sudo cat "$WORK/mnt/var/lib/snap/state.json" || true
+
+grep -aq "SNAP: starting the installed Proxmox VE." "$WORK/pass2.log" || {
+    echo "e2e: the stick's menu did not detect the installed system" >&2
+    exit 1
+}
+[ "$result" = finished ] || { echo "e2e: CRACKLE did not finish ($result)" >&2; exit 1; }
+sudo test -e "$WORK/mnt/var/lib/snap/progress/crackle.done"
+# The automation tools CRACKLE installs (design decision D7).
+sudo test -x "$WORK/mnt/usr/local/bin/tofu"
+sudo grep -q 'filesystem_mirror' "$WORK/mnt/root/.tofurc"
+sudo grep -A1 -E '^Package: (ansible-core|python3-httpx)$' "$WORK/mnt/var/lib/dpkg/status" | grep -c 'install ok installed' | grep -qx 2
+sudo test -d "$WORK/mnt/usr/share/ansible/collections/ansible_collections/oxlorg/opnsense"
+sudo test -s "$WORK/mnt/var/lib/snap/secrets/proxmox-api-token"
+echo "e2e: OK ($FIRMWARE): installed unattended, stick booted the install, handoff and CRACKLE complete"
