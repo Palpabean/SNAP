@@ -167,14 +167,18 @@ Changes from the original plan, to stay lightweight:
 - **The OPNsense template moves to M3**, together with its importer spike (D2).
 
 ### 7.3 POP (stage 3, on the host)
-1. Render the network model from `snap.yaml`: subnets, VLANs, DHCP, DNS, firewall rules.
-2. Render a bootstrap `config.xml` that assigns the interfaces (WAN, LAN, one per lab network), sets the management address and an API key, and enables the API. Interface assignment goes here rather than through the API, because the API does not fully cover it.
-3. Pack `config.xml` into a small ISO under `conf/config.xml` and attach it to the cloned OPNsense VM. The OPNsense importer reads ISO9660 media (since 22.1.7). It only starts after a keypress, so POP answers its prompts over the VM's serial console on the first boot (D2, confirmed by the spike).
-4. Start OPNsense, wait for the API, then apply DHCP, DNS, aliases and firewall rules through it (the Ansible `oxlorg.opnsense` collection, formerly `ansibleguy.opnsense`). Pin the OPNsense version to the one the collection supports, because the collection tracks the newest OPNsense API.
-5. Create the Ubuntu VMs with OpenTofu and the `bpg/proxmox` provider (or leave them as templates, per setting) with the chosen credentials through cloud-init.
-6. Verify from a test VM: it receives an address, reaches the router, resolves DNS, and blocked paths are actually blocked.
+POP builds the lab with OpenTofu (the VMs) and Ansible (the router's settings and the check from inside), D7. The decisions (VM IDs, fixed MAC addresses, reserved addresses, DHCP ranges, firewall rules per policy) are made in one place, `snaplab/stages/pop/lab.py`, from `snap.yaml`; the tools only apply them. Each step checks the machine first, so it is safe to repeat.
 
-The host's own management connection stays on the existing network. Moving it behind the router is an optional later feature that must use a confirm-or-revert timer; the "network change undone" screen exists for that case.
+1. **Router template.** Unpack the pinned OPNsense nano image from the stick into template VM 9001 (`snap-opnsense-261`): BIOS boot, serial console, no guest agent.
+2. **Admin network (D8).** Give the host `172.31.255.2/29` on VLAN 4094 of `vmbr1` (`vmbr1.4094`, in `/etc/network/interfaces.d/snap-admin`) with routes to every lab network through the router at `172.31.255.1`. Lab networks may not use that VLAN or range.
+3. **SSH key** for Ansible, `/root/.ssh/snap_lab_ed25519`; its public half goes to every lab machine with the user's own keys.
+4. **Bootstrap config.** Generate an API key (kept root-only in `/var/lib/snap/secrets/opnsense-api.json`), render `config.xml` (interfaces in VM card order: WAN on `vmbr0`, the admin network, then one per lab network on its VLAN; the root password from `snap.yaml`; the API key; admin-network rules for the API, SSH and ping) and pack it into `snap-router-config.iso` under `conf/`.
+5. **Router.** OpenTofu clones VM 100 (`snap-router`) from the template, stopped, with the ISO attached. POP starts it, answers the importer on the serial console (D2), then waits for the API. If that first boot was missed, the router is recreated, because the importer is offered only once.
+6. **Router settings through the API** (Ansible, `oxlorg.opnsense`): a private-ranges alias, the firewall rules, the DHCP server (Kea) with one range per network, and a reservation for each lab machine. Rules per network, in order: no access to the admin network; DNS and ping to the router's own address on that network; the custom `rules`; then the policy (*isolated*: nothing more; *internet-only*: anything that is not a private range; *open*: anything).
+7. **Lab machines** (OpenTofu): linked clones of the Ubuntu template on their network's VLAN, with fixed MAC addresses so the reservations apply, and the user and keys through cloud-init. `templates-only` creates none.
+8. **Check from inside** (Ansible, over the admin network): each machine has its reserved address, reaches the router, resolves the router's name through it, and reaches the other networks only where its policy allows.
+
+The OpenTofu working directory (`/var/lib/snap/pop/tofu`) and the generated Ansible files stay on the host, so the lab can be changed later by editing the variables and applying again. The host's own management connection stays on the existing network. Moving it behind the router is an optional later feature that must use a confirm-or-revert timer; the "network change undone" screen exists for that case.
 
 ### 7.4 BANG (stage 4, on the host)
 1. Re-run every stage's verify step as a final end-to-end check.
@@ -285,6 +289,6 @@ The code lives in one Python package, `snaplab`, so the parts can import each ot
 - **M0:** repository, license, `snap.yaml` schema, test layers 1 and 2.
 - **M1:** the USB boot-chain spike (D1), then SNAP end to end: wizard, answer file, unattended install, handoff.
 - **M2:** the engine (`snap resume`, `snap status`, `snap logs`) and CRACKLE with the Ubuntu template.
-- **M3:** the OPNsense template and importer spike (D2), then POP with OPNsense, networks, test VMs, and policy tests.
+- **M3:** the OPNsense template and importer spike (D2, passed), then POP with OPNsense, networks, test VMs, and policy tests.
 - **M4:** BANG, recovery screens, the Builder, and hardware testing.
 - **Later:** remote access, more delivery methods, Windows images, ZFS and mirrors.
