@@ -1,0 +1,39 @@
+name: Proxmox installer probe (temporary)
+
+# Prints the start-up script of the pinned Proxmox installer, so SNAP's disk
+# prompt can hook in at the right place. Removed once the hook is built.
+on:
+  push:
+    paths:
+      - ".github/workflows/pve-initrd-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .snaplab-cache
+          key: snaplab-cache-${{ hashFiles('checksums.lock') }}
+      - run: sudo apt-get install -y -q xorriso zstd cpio
+      - name: Unpack the installer's initrd
+        run: |
+          set -eux
+          iso=$(ls .snaplab-cache/proxmox-ve_*.iso 2>/dev/null | head -1 || true)
+          if [ -z "$iso" ]; then
+            url=$(python3 -c 'import tomllib; print(tomllib.load(open("checksums.lock","rb"))["proxmox-ve"]["url"])')
+            curl -fsSL -o pve.iso "$url"; iso=pve.iso
+          fi
+          xorriso -osirrox on -indev "$iso" -extract /boot/initrd.img initrd.img -extract /boot/grub/grub.cfg grub.cfg
+          ls -la initrd.img; file initrd.img
+          mkdir root && cd root
+          (zstd -dc ../initrd.img 2>/dev/null || gzip -dc ../initrd.img) | cpio -idm --quiet
+          find . -maxdepth 2 | sort | head -100
+          echo "===== /init"; cat init
+          ls -la sbin bin usr/bin 2>/dev/null | head -80
+          echo "===== grub.cfg"; cat ../grub.cfg
