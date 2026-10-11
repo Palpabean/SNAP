@@ -58,3 +58,5 @@ def test_repo_lock_pins_proxmox():
     assert pve["url"].endswith(f"proxmox-ve_{pve['version']}.iso")
     assert len(pve["sha256"]) == 64
     assert lock["proxmox-auto-install-assistant"]["version"].startswith(pve["version"].split("-")[0])
+    ubuntu = lock["ubuntu-cloud-image"]
+    assert ubuntu["url"].startswith("https://cloud-images.ubuntu.com/") and len(ubuntu["sha256"]) == 64

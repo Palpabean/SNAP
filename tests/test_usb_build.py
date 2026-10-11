@@ -12,6 +12,7 @@ import os
 import select
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -76,18 +77,50 @@ menuentry 'Install Proxmox VE (Graphical)' --class debian --class gnu-linux --cl
 # --- payload ---------------------------------------------------------------
 
 
-def test_payload_manifest_satisfies_firstboot(tmp_path):
+def make_test_payload(tmp_path):
+    from snaplab.core import config
+
+    image_file = tmp_path / "ubuntu.img"
+    image_file.write_bytes(b"fake cloud image")
     payload = tmp_path / "payload"
-    build.make_payload(EXAMPLE, payload)
+    cfg = config.load(EXAMPLE)
+    build.make_payload(EXAMPLE, cfg, {"images/ubuntu-24.04-server-cloudimg-amd64.img": image_file}, payload)
+    return payload, cfg
+
+
+def test_payload_manifest_satisfies_firstboot(tmp_path):
+    payload, cfg = make_test_payload(tmp_path)
     assert (payload / "snap.yaml").read_bytes() == EXAMPLE.read_bytes()
+    assert json.loads((payload / "snap.json").read_text()) == cfg
     assert os.access(payload / "bin" / "snap", os.X_OK)
     listed = [line.split("  ", 1)[1] for line in (payload / "payload.sha256").read_text().splitlines()]
-    assert listed == ["bin/snap", "snap.yaml"]
+    assert {"bin/snap", "snap.yaml", "snap.json", "lib/snaplab/hostcli.py"} <= set(listed)
+    assert "images/ubuntu-24.04-server-cloudimg-amd64.img" in listed
 
     env = {**os.environ, "SNAP_ROOT": str(tmp_path / "root"), "SNAP_SOURCE": str(payload)}
     result = subprocess.run(["bash", str(FIRSTBOOT)], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout
     assert (tmp_path / "root/var/lib/snap/snap.yaml").read_bytes() == EXAMPLE.read_bytes()
+
+
+def test_engine_on_the_stick_needs_only_the_standard_library(tmp_path):
+    """The host has python3 but none of the builder's packages (PyYAML, jsonschema)."""
+    payload, _ = make_test_payload(tmp_path)
+    env = {"PYTHONPATH": str(payload / "lib"), "PATH": os.environ["PATH"]}
+    # -S: no site-packages, so only the standard library and the shipped engine are importable.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            "import snaplab.hostcli, sys; print(sorted(set(sys.modules) & {'yaml', 'jsonschema'}))",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "[]"
 
 
 def test_layout_is_aligned():
@@ -125,16 +158,41 @@ def built(tmp_path_factory):
     stub = bindir / build.ASSISTANT
     stub.write_text(STUB_ASSISTANT)
     stub.chmod(0o755)
+    ubuntu = tmp / "mirror" / "ubuntu-24.04-server-cloudimg-amd64.img"
+    ubuntu.write_bytes(b"stand-in cloud image")
+
+    def entry(table, path, extra=""):
+        return f'[{table}]\nversion = "1"\nurl = "{path.as_uri()}"\nsha256 = "{fetch.sha256(path)}"\n{extra}'
+
+    tofu = tmp / "mirror" / "tofu_1_linux_amd64.zip"
+    provider = tmp / "mirror" / "terraform-provider-proxmox_1_linux_amd64.zip"
+    collection = tmp / "mirror" / "oxlorg-opnsense-1.tar.gz"
+    for f in (tofu, provider, collection):
+        f.write_bytes(f.name.encode())
     lock = tmp / "checksums.lock"
     lock.write_text(
         f'[proxmox-ve]\nversion = "9.2-1"\nurl = "{iso.as_uri()}"\nsha256 = "{fetch.sha256(iso)}"\n'
         '[proxmox-auto-install-assistant]\nversion = "9.2.8"\n'
+        + entry("ubuntu-cloud-image", ubuntu)
+        + entry("opentofu", tofu)
+        + entry("opentofu-provider-proxmox", provider, 'source = "registry.opentofu.org/bpg/proxmox"\n')
+        + '[ansible]\ndebian_packages = ["ansible-core"]\nansible_core = "2.19."\n'
+        + f'[[ansible-collection]]\nname = "oxlorg.opnsense"\nversion = "1"\nurl = "{collection.as_uri()}"\n'
+        + f'sha256 = "{fetch.sha256(collection)}"\n'
     )
+
+    def fake_bundle_debs(spec, repo, log=print):
+        # Downloading from Debian needs root and the network; CI's USB e2e job does it for real.
+        repo.mkdir(parents=True)
+        (repo / "ansible-core_2.19.11_all.deb").write_bytes(b"deb")
+        (repo / "Packages").write_text("Package: ansible-core\nVersion: 2.19.11\n")
+        return {"install": spec["debian_packages"], "versions": {"ansible-core": "2.19.11"}}
 
     mp = pytest.MonkeyPatch()
     mp.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
     # Keep dpkg-query from answering for a package that is not installed here.
     mp.setattr(build, "assistant_version", lambda: "9.2.8")
+    mp.setattr(build, "bundle_debs", fake_bundle_debs)
     try:
         out = build.build(EXAMPLE, tmp / "snap.img", cache=tmp / "cache", lock_path=lock, log=lambda _: None)
     finally:
@@ -341,3 +399,44 @@ def test_menu_serial_console_option():
     assert "console=ttyS0" not in plain and "@KERNEL_EXTRA@" not in plain
     assert "proxmox-start-auto-installer console=tty0 console=ttyS0,115200" in serial
     assert "root=/dev/mapper/pve-root quiet console=tty0 console=ttyS0,115200" in serial
+
+
+@needs_image_tools
+def test_tools_travel_on_the_stick(built, tmp_path):
+    img, _ = built
+    data = partitions(img)["SNAPDATA"]
+    part = tmp_path / "data.img"
+    with img.open("rb") as f, part.open("wb") as out:
+        f.seek(data["start"] * 512)
+        out.write(f.read(data["size"] * 512))
+    manifest = subprocess.run(
+        ["debugfs", "-R", "cat /payload.sha256", str(part)], check=True, capture_output=True, text=True
+    ).stdout
+    for name in ("tools/opentofu.zip", "tools/provider-proxmox.zip", "debs/Packages", "tools.json"):
+        assert name in manifest
+    assert "collections/oxlorg-opnsense-1.tar.gz" in manifest
+    tools_json = json.loads(
+        subprocess.run(["debugfs", "-R", "cat /tools.json", str(part)], check=True, capture_output=True).stdout
+    )
+    assert tools_json["debian_packages"]["install"] == ["ansible-core"]
+    assert tools_json["provider_proxmox"]["source"] == "registry.opentofu.org/bpg/proxmox"
+
+
+def test_debian_index_lists_each_package(tmp_path):
+    if shutil.which("dpkg-deb") is None:
+        pytest.skip("dpkg-deb not installed")
+    pkg = tmp_path / "pkg"
+    (pkg / "DEBIAN").mkdir(parents=True)
+    (pkg / "DEBIAN" / "control").write_text(
+        "Package: snap-test\nVersion: 1.2-3\nArchitecture: all\nMaintainer: t <t@example.org>\nDescription: test\n"
+    )
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(
+        ["dpkg-deb", "--build", str(pkg), str(repo / "snap-test_1.2-3_all.deb")], check=True, capture_output=True
+    )
+    from snaplab.delivery.usb import debs
+
+    assert debs.write_index(repo) == {"snap-test": "1.2-3"}
+    index = (repo / "Packages").read_text()
+    assert "Filename: ./snap-test_1.2-3_all.deb" in index and "SHA256: " in index

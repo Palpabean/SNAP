@@ -13,6 +13,7 @@ the container from snaplab/delivery/usb/Containerfile.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -20,12 +21,13 @@ import tempfile
 from importlib import resources
 from pathlib import Path
 
+import snaplab
 from snaplab.core import config
-from snaplab.delivery.usb import fetch, image, menu
+from snaplab.delivery.usb import debs, fetch, image, menu
 from snaplab.stages.snap import answer
 
 ASSISTANT = "proxmox-auto-install-assistant"
-TOOLS = [ASSISTANT, "xorriso", "mkfs.ext4", "sfdisk"]
+TOOLS = [ASSISTANT, "xorriso", "mkfs.ext4", "sfdisk", "apt-get", "dpkg-deb"]
 REPO_LOCK = Path(__file__).resolve().parents[3] / "checksums.lock"
 
 
@@ -103,16 +105,73 @@ def prepare(iso: Path, answer_toml: str, firstboot: bytes, assistant: str, cache
     return prepared
 
 
-def make_payload(config_path: Path, dest: Path) -> None:
-    """The SNAPDATA contents: snap.yaml, the engine, and a checksum manifest over both."""
+def make_payload(config_path: Path, cfg: dict, files: dict[str, Path], dest: Path, tools: dict | None = None) -> None:
+    """The SNAPDATA contents, copied to /var/lib/snap on the host at first boot.
+
+    snap.yaml (as written) and snap.json (validated, for the host, which has no
+    YAML library), the engine (lib/snaplab, bin/snap), `files` (payload path to
+    source: VM images, tool archives, Debian packages), tools.json describing
+    the bundled tools, and a checksum manifest over everything.
+    """
     (dest / "bin").mkdir(parents=True)
     shutil.copyfile(config_path, dest / "snap.yaml")
-    engine = dest / "bin" / "snap"
-    engine.write_bytes(_asset("snaplab.delivery.usb", "engine-placeholder.sh"))
-    engine.chmod(0o755)
+    (dest / "snap.json").write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n")
+    command = dest / "bin" / "snap"
+    command.write_bytes(_asset("snaplab.delivery.usb", "snap-host.sh"))
+    command.chmod(0o755)
+    package = Path(snaplab.__file__).parent
+    for src in package.rglob("*.py"):
+        target = dest / "lib" / "snaplab" / src.relative_to(package)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, target)
+    for name, src in files.items():
+        (dest / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dest / name)
+    (dest / "tools.json").write_text(json.dumps(tools or {}, indent=2, sort_keys=True) + "\n")
     files = sorted(p for p in dest.rglob("*") if p.is_file())
     manifest = "".join(f"{fetch.sha256(p)}  {p.relative_to(dest).as_posix()}\n" for p in files)
     (dest / "payload.sha256").write_text(manifest)
+
+
+def bundle_lab_files(lock: dict, cache: Path, log=print) -> tuple[dict[str, Path], dict]:
+    """Fetch the pinned VM image and tool archives; return (payload files, tools.json)."""
+    files: dict[str, Path] = {}
+    ubuntu = lock["ubuntu-cloud-image"]
+    files["images/ubuntu-24.04-server-cloudimg-amd64.img"] = fetch.fetch(
+        ubuntu["url"], ubuntu["sha256"], cache, log=log
+    )
+
+    tofu, provider = lock["opentofu"], lock["opentofu-provider-proxmox"]
+    files["tools/opentofu.zip"] = fetch.fetch(tofu["url"], tofu["sha256"], cache, log=log)
+    files["tools/provider-proxmox.zip"] = fetch.fetch(provider["url"], provider["sha256"], cache, log=log)
+    collections = []
+    for c in lock["ansible-collection"]:
+        archive = fetch.fetch(c["url"], c["sha256"], cache, log=log)
+        files[f"collections/{archive.name}"] = archive
+        collections.append({"name": c["name"], "version": c["version"], "file": f"collections/{archive.name}"})
+    tools = {
+        "opentofu": {"version": tofu["version"], "file": "tools/opentofu.zip"},
+        "provider_proxmox": {
+            "source": provider["source"],
+            "version": provider["version"],
+            "file": "tools/provider-proxmox.zip",
+        },
+        "ansible_collections": collections,
+    }
+    return files, tools
+
+
+def bundle_debs(spec: dict, repo: Path, log=print) -> dict:
+    """Download Ansible's Debian packages into a local repository; return what to install."""
+    log("bundling Ansible from Debian")
+    debs.download(spec["debian_packages"], repo)
+    versions = debs.write_index(repo)
+    core = versions.get("ansible-core", "")
+    if not core.startswith(spec["ansible_core"]):
+        raise BuildError(
+            f"Debian offers ansible-core {core or 'none'}, but checksums.lock expects {spec['ansible_core']}*"
+        )
+    return {"install": spec["debian_packages"], "versions": {p: versions[p] for p in spec["debian_packages"]}}
 
 
 def build(
@@ -136,6 +195,7 @@ def build(
 
     pve = lock["proxmox-ve"]
     iso = fetch.fetch(pve["url"], pve["sha256"], cache, log=log)
+    files, tools = bundle_lab_files(lock, cache, log)
     firstboot = _asset("snaplab.stages.snap", "firstboot.sh")
 
     output = output.resolve()
@@ -146,7 +206,10 @@ def build(
         image.run([ASSISTANT, "validate-answer", str(work / "answer.toml")])
         prepared = prepare(iso, answer_toml, firstboot, installed, cache, log=log)
 
-        make_payload(config_path, work / "payload")
+        repo = work / "debs"
+        tools["debian_packages"] = bundle_debs(lock["ansible"], repo, log)
+        files.update({f"debs/{f.name}": f for f in repo.iterdir()})
+        make_payload(config_path, cfg, files, work / "payload", tools)
         image.make_data(work / "payload", work / "data.img")
 
         log("assembling the USB image")

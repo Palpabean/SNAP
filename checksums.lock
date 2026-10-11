@@ -10,3 +10,50 @@ sha256 = "4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c"
 # Must match the ISO's release series; mismatches cause answer-file errors.
 [proxmox-auto-install-assistant]
 version = "9.2.8"
+
+# Base of the lab machines' VM template (CRACKLE). From Ubuntu's SHA256SUMS
+# for this dated release; dated releases are removed after a while, so bump
+# this when the download disappears.
+[ubuntu-cloud-image]
+version = "24.04 (release-20260926)"
+url = "https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-amd64.img"
+sha256 = "6a81c37564db9b1ee84e141922625e1d7c5b389b99bb3c572e0243607d5bb4d2"
+
+# Automation tools installed on the host by CRACKLE (design decision D7).
+# OpenTofu and the provider: from each project's SHA256SUMS for the release.
+[opentofu]
+version = "1.13.1"
+url = "https://github.com/opentofu/opentofu/releases/download/v1.13.1/tofu_1.13.1_linux_amd64.zip"
+sha256 = "8ccbc6f8ee21d2827715f3c6e08a9b3e0209b1e62057c05067ef117e047c1a80"
+
+[opentofu-provider-proxmox]
+source = "registry.opentofu.org/bpg/proxmox"
+version = "0.116.0"
+url = "https://github.com/bpg/terraform-provider-proxmox/releases/download/v0.116.0/terraform-provider-proxmox_0.116.0_linux_amd64.zip"
+sha256 = "9c83aa1ed438e0f4337bd4e05b35df55292f34d6b70aab906506e1594920811d"
+
+# Ansible from Debian 13 (the base of Proxmox VE 9), fetched with apt in the
+# builder container, so Debian's signatures vouch for the packages. The
+# builder checks the downloaded ansible-core matches this release series.
+[ansible]
+debian_packages = ["ansible-core", "python3-httpx"]
+ansible_core = "2.19."
+
+# Ansible collections from Galaxy, with their dependencies.
+[[ansible-collection]]
+name = "oxlorg.opnsense"
+version = "26.1.11"
+url = "https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/artifacts/oxlorg-opnsense-26.1.11.tar.gz"
+sha256 = "13d0a4b831eb82b98f866d0e8f441489693e865313d8122e2cc0f8b2e01e9108"
+
+[[ansible-collection]]
+name = "community.general"
+version = "13.5.0"
+url = "https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/artifacts/community-general-13.5.0.tar.gz"
+sha256 = "54598287e0ea0504aee2d32c884208ddf26f3ac41e0b4e773ff514af210787c4"
+
+[[ansible-collection]]
+name = "community.library_inventory_filtering_v1"
+version = "1.1.5"
+url = "https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/artifacts/community-library_inventory_filtering_v1-1.1.5.tar.gz"
+sha256 = "cbb9e86c5b1720df21e940cedcd2f3e1226c38262623e090a883712610733851"
