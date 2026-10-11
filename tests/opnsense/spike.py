@@ -61,7 +61,7 @@ def main(image: str, work: str) -> int:
         nics += ["-nic", "user,model=virtio-net-pci,restrict=on"]
     cmd = [
         "qemu-system-x86_64", "-enable-kvm", "-machine", "q35", "-cpu", "host", "-smp", "2", "-m", "2048",
-        "-display", "none", "-serial", f"unix:{sock},server=on,wait=off",
+        "-nodefaults", "-vga", "std", "-display", "none", "-serial", f"unix:{sock},server=on,wait=off",
         "-drive", f"file={image},format=raw,if=virtio,snapshot=on",
         "-drive", f"file={iso},media=cdrom,if=ide", *nics,
     ]  # fmt: skip

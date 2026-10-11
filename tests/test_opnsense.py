@@ -54,10 +54,10 @@ DEVLIST = """
 """
 
 
-def test_find_cdrom():
-    assert opnsense.find_cdrom(DEVLIST) == "cd0"
-    assert opnsense.find_cdrom("<QEMU DVD-ROM>  at scbus1 target 0 lun 0 (cd1,pass3)") == "cd1"
-    assert opnsense.find_cdrom("<Virtio disk> (vtbd0)") is None
+def test_cd_drives():
+    assert opnsense.cd_drives(DEVLIST) == ["cd0"]
+    assert opnsense.cd_drives("<QEMU DVD-ROM>  at scbus1 target 0 lun 0 (cd1,pass3)") == ["cd1"]
+    assert opnsense.cd_drives("<QEMU DVD-ROM 2.5+>   at scbus0 target 0 lun 0 ()") == []
 
 
 class FakeConsole:
@@ -101,30 +101,43 @@ def test_importer_is_answered(tmp_path):
     assert fake.received == ["\r", "cd0\r"]
 
 
-def test_importer_failure_is_reported(tmp_path):
+def test_drive_not_ready_yet_is_retried(tmp_path, monkeypatch):
+    monkeypatch.setattr(opnsense.time, "sleep", lambda _: None)
+    unnamed = "<QEMU DVD-ROM 2.5+>   at scbus0 target 0 lun 0 ()\n"
+    again = unnamed + opnsense.DEVICE_PROMPT + ": "
     fake = FakeConsole(
         tmp_path,
         [
             (opnsense.IMPORTER_PROMPT + ": ...", "\r"),
-            (DEVLIST + opnsense.DEVICE_PROMPT + ": ", "cd0\r"),
-            ("The device could not be mounted.\n", None),
+            (again, "cd0\r"),
+            ("No known partition layout was found for 'cd0'.\n" + again, "cd1\r"),
+            ("The device could not be mounted.\nThe file /conf/config.xml could not be found.\n" + again, "cd2\r"),
+            ("No known partition layout was found for 'cd2'.\n" + again, "cd3\r"),
+            ("No known partition layout was found for 'cd3'.\n" + again, "cd0\r"),
+            (opnsense.IMPORTED + "\n", None),
         ],
     )
     console = opnsense.Serial(fake.path, connect_timeout=5)
-    with pytest.raises(opnsense.ImportFailed, match="could not be mounted"):
-        opnsense.run_importer(console, timeout=10)
+    assert opnsense.run_importer(console, timeout=10) == "cd0"
+    assert fake.received == ["\r", "cd0\r", "cd1\r", "cd2\r", "cd3\r", "cd0\r"]
 
 
-def test_no_cd_drive_leaves_the_importer(tmp_path):
+def test_no_cd_drive_leaves_the_importer(tmp_path, monkeypatch):
+    monkeypatch.setattr(opnsense.time, "sleep", lambda _: None)
+    missing = [
+        (f"No known partition layout was found for 'cd{i}'.\n" + opnsense.DEVICE_PROMPT, f"cd{i + 1}\r")
+        for i in range(3)
+    ]
     fake = FakeConsole(
         tmp_path,
-        [(opnsense.IMPORTER_PROMPT + ": ...", "\r"), ("<disk> (ada0,pass0)\n" + opnsense.DEVICE_PROMPT, "\r")],
+        [(opnsense.IMPORTER_PROMPT + ": ...", "\r"), (opnsense.DEVICE_PROMPT, "cd0\r"), *missing]
+        + [("No known partition layout was found for 'cd3'.\n" + opnsense.DEVICE_PROMPT, "\r")],
     )
     console = opnsense.Serial(fake.path, connect_timeout=5)
-    with pytest.raises(opnsense.ImportFailed, match="no CD drive"):
-        opnsense.run_importer(console, timeout=10)
+    with pytest.raises(opnsense.ImportFailed, match="no CD drive held the config"):
+        opnsense.run_importer(console, timeout=10, settle=0)
     fake.thread.join(5)
-    assert fake.received == ["\r", "\r"]
+    assert fake.received[-1] == "\r"
 
 
 def test_missing_prompt_times_out(tmp_path):
