@@ -6,6 +6,7 @@
     snap screen   the setup screen on the computer's monitor (the snap-screen service)
 
 Started by the snap-resume service after the handoff, and by hand to retry.
+BANG, the last stage, turns that service off once the lab is ready.
 Standard library only.
 """
 
@@ -20,16 +21,16 @@ import sys
 from snaplab.core import defaults
 from snaplab.core.engine import LOG_FILE, STATE_DIR, Context, Engine
 from snaplab.core.host import Host
+from snaplab.stages.bang import stage as bang
 from snaplab.stages.crackle.stage import STAGE as CRACKLE
 from snaplab.stages.pop.stage import STAGE as POP
 
-STAGES = [CRACKLE, POP]
+STAGES = [CRACKLE, POP, bang.STAGE]
 # What the setup wizard on the stick saved on the new disk: the choices made on
 # its screens, laid over the stick's settings. Kept outside STATE_DIR, which the
 # handoff replaces.
 WIZARD_SETTINGS = "/etc/snap/wizard.json"
 SCREEN_MARK = "/run/snap/screen"  # present while `snap screen` is on the monitor
-NEXT = "BANG (final checks and the summary) is not built yet (milestone M4)."
 
 
 def consoles(screen_on: bool) -> list[str]:
@@ -79,7 +80,8 @@ def main(argv: list[str] | None = None, host: Host | None = None) -> int:
     if args.command == "resume":
         if not engine.resume():
             return 1
-        console(f"SNAP: {NEXT}")
+        web = (bang.web_address(host) or "https://<this computer>:8006") + " (user root)"
+        console(f"SNAP: Your lab is ready. Open {web}; the summary is in {bang.SUMMARY_TEXT}.")
     elif args.command == "status":
         print("\n".join(engine.status()))
     elif args.command == "screen":

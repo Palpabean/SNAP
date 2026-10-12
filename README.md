@@ -28,6 +28,7 @@ internet connection.
    into the browser on your own computer, and log in.
 
 **Full step-by-step guide: [docs/INSTALL.md](docs/INSTALL.md)**
+**Pictures of every screen, in order: [docs/screens](docs/screens/README.md)**
 
 ## What you need
 
@@ -46,9 +47,10 @@ SNAP builds the lab in four stages, named after the sound of a spark. The screen
 | **SNAP** | The USB stick: checks the computer, asks its questions, installs Proxmox | Yes |
 | **CRACKLE** | Prepares the new Proxmox computer and the tools that build the lab | Yes |
 | **POP** | Builds the router, the networks and the Ubuntu machines, then checks they work | Yes |
-| **BANG** | Final checks and clean-up | Not yet (coming in a later version) |
+| **BANG** | Checks the whole lab once more, writes a summary, removes spare copies of keys and passwords | Yes |
 
-The lab is fully usable once POP finishes. Every stage is tested automatically by installing
+When BANG finishes, the lab computer's screen says **Your lab is ready**, and a summary of the
+lab is saved on it as `/root/snap-lab.txt`. Every stage is tested automatically by installing
 the whole thing on a virtual computer, from the stick to the ready lab.
 
 ## If something goes wrong

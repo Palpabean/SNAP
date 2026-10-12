@@ -44,6 +44,8 @@ your own computer, plug it into the spare computer, and let it work.
 
 ## Part 2: set up the lab (on the spare computer, about 1 hour, mostly waiting)
 
+Want to see each screen before you start? They are all in [docs/screens](screens/README.md).
+
 1. **Plug in** the USB stick and the network cable, then turn the computer on.
 
 2. **Start from the USB stick.** Right after switching on, press the boot menu key (usually **F12**, **F11**, **F8** or **Esc**; the screen often says which) and pick the USB stick.

@@ -28,41 +28,25 @@ from typing import Any
 
 from snaplab.core import logo
 from snaplab.core.engine import LOG_FILE, PROGRESS_DIR, Engine
-from snaplab.core.host import CommandError
+from snaplab.stages.bang.stage import PASSWORD_FILE, web_address
 from snaplab.stages.pop import addresses, lab
-
-PASSWORD_FILE = "/etc/snap/password"  # written by the setup wizard on the stick
-WEB_PORT = 8006
 
 # What each stage does, in plain words (the stage titles carry the code names).
 STAGES = [
     ("snap", "SNAP", "Install Proxmox"),
     ("crackle", "CRACKLE", "Prepare this computer"),
     ("pop", "POP", "Build the router, networks and machines"),
-    ("bang", "BANG", "Final checks (coming in a later version)"),
+    ("bang", "BANG", "Final checks and clean-up"),
 ]
 POLICIES = {
     "internet-only": "internet only",
     "isolated": "isolated",
     "open": "internet and other lab networks",
 }
-MINUTES_LEFT = {"snap": 40, "crackle": 35, "pop": 25}
+MINUTES_LEFT = {"snap": 40, "crackle": 35, "pop": 25, "bang": 5}
 
 
 # --- what the screen shows ------------------------------------------------------
-
-
-def web_address(host) -> str | None:
-    """https://<this computer's address>:8006, from the main bridge (vmbr0)."""
-    try:
-        found = json.loads(host.run("ip", "-j", "-4", "addr", "show", "vmbr0"))
-    except (CommandError, ValueError):
-        return None
-    for link in found:
-        for a in link.get("addr_info", []):
-            if a.get("family") == "inet" and a.get("local"):
-                return f"https://{a['local']}:{WEB_PORT}"
-    return None
 
 
 def lab_summary(host, cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -112,10 +96,9 @@ def snapshot(engine: Engine) -> dict[str, Any]:
         current = {"stage": stage.name, "steps": steps, "at": min(at, len(steps) - 1)}
         break
 
-    built = [s for s in stages if s["name"] in ("snap", "crackle", "pop")]
     if any(s["status"] == "failed" for s in stages):
         phase = "failed"
-    elif all(s["status"] == "done" for s in built):
+    elif all(s["status"] == "done" for s in stages):
         phase = "ready"
     else:
         phase = "working"

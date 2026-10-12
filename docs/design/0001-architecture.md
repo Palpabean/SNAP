@@ -191,11 +191,13 @@ POP first places the lab's address ranges: any lab network, or the admin network
 The OpenTofu working directory (`/var/lib/snap/pop/tofu`) and the generated Ansible files stay on the host, so the lab can be changed later by editing the variables and applying again. The host's own management connection stays on the existing network. Moving it behind the router is an optional later feature that must use a confirm-or-revert timer; the "network change undone" screen exists for that case.
 
 ### 7.4 BANG (stage 4, on the host)
-1. Re-run every stage's verify step as a final end-to-end check.
-2. Write a summary: Proxmox web address, login, networks, VM names and addresses.
-3. Scrub secrets from the payload and the state files, and keep only hashes and the summary.
-4. Disable the automatic-resume service so the host boots normally from now on.
-5. Mark the lab as ready and show the *Your lab is ready* screen.
+Built in `snaplab/stages/bang/stage.py`. Each step observes first, like every other stage:
+1. **Check the whole lab one last time:** every CRACKLE and POP step must still hold (a step that no longer does stops BANG and is named, rather than covered up); the router and each lab machine must be running (a stopped one is started); the router's API must answer; and the check from inside the lab (POP step 9) runs again.
+2. **Write the summary:** the web address, login, router, networks (as placed, after any move) and machines, as `/var/lib/snap/summary.json` and, for people, `/root/snap-lab.txt` (root-only). It never holds the password.
+3. **Remove spare copies of keys and passwords:** Ansible's copy of the router's API key is deleted (POP writes it again when it needs it); the router's bootstrap config ISO, which holds that key and stays attached to the router, becomes readable by root only; any key or password found in the logs (engine, router console, first boot) is replaced by `[removed by SNAP]`. Kept on purpose, root-only: the OpenTofu API token, the router's API key and the SSH key, to change the lab later (D7), and the setup wizard's password file, which the ready screen shows. The state file is the engine's own and is left as it is (it holds only step names, times and short error lines).
+4. **Stop running setup at every start-up:** `systemctl disable snap-resume` (the unit also stops once `bang.done` exists). The `snap-screen` service stays, showing the ready screen.
+
+The engine then writes `bang.done`: the boot menu offers **Start my lab**, the screen shows *Your lab is ready*, and `snap resume` ends with the web address.
 
 ### 7.5 The handoff between SNAP and CRACKLE
 After the unattended install, the machine restarts and the USB, still first in the boot order, loads again. Nothing has run in between that could have recorded the install as finished, so the SNAP environment decides by **observing the machine**:
@@ -238,9 +240,9 @@ ECHO (`snap echo`) is remote access with Tailscale. It is a separate command the
 
 ## 10. Security and secrets
 
-- Passwords are hashed before they are written anywhere. The wizard never stores plaintext.
+- Passwords are hashed before they go into any settings or answer file. The one plaintext copy is the setup wizard's password file on the lab computer (`/etc/snap/password`, root-only), which the ready screen shows.
 - Any Tailscale credential is used once. A single-use, expiring key is recommended.
-- BANG removes secret material from the payload and state files.
+- BANG removes spare copies of keys and passwords and blanks any found in the logs (section 7.4). The setup wizard's password is kept in a root-only file so the lab computer's screen can show it.
 - Checksums are pinned and verified before any artifact is used.
 - Destructive operations always require the typed confirmation.
 
