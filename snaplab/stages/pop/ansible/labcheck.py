@@ -1,9 +1,12 @@
-"""ping, for the lab check (verify.yml): the minimal lab machine images have Python but no ping.
+"""The checks verify.yml runs on each lab machine, the same on any Linux with Python
+(minimal images lack ping, and ip and getent differ between distributions):
 
-    python3 ping.py ADDRESS      exit 0 if ADDRESS answers an ICMP echo within two tries
+    python3 labcheck.py ping ADDRESS      ADDRESS answers an ICMP echo within two tries
+    python3 labcheck.py has ADDRESS       this machine has ADDRESS
+    python3 labcheck.py resolve NAME      NAME resolves through the system's DNS
 
-Uses an unprivileged ICMP socket where the system allows it (Ubuntu does), else a raw one
-(needs root). Runs on the lab machine, so standard library only.
+Exit 0 when the check holds. ping uses an unprivileged ICMP socket where the system
+allows it, else a raw one (needs root). Standard library only.
 """
 
 import socket
@@ -48,5 +51,24 @@ def ping(address: str, tries: int = 2, timeout: float = 2.0) -> bool:
     return False
 
 
+def has(address: str) -> bool:
+    """Binding to an address works only when this machine has it."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        try:
+            sock.bind((address, 0))
+            return True
+        except OSError:
+            return False
+
+
+def resolve(name: str) -> bool:
+    try:
+        print(socket.gethostbyname(name))
+        return True
+    except OSError:
+        return False
+
+
 if __name__ == "__main__":
-    sys.exit(0 if ping(sys.argv[1]) else 1)
+    check = {"ping": ping, "has": has, "resolve": resolve}[sys.argv[1]]
+    sys.exit(0 if check(sys.argv[2]) else 1)

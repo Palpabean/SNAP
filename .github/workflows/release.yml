@@ -107,7 +107,8 @@ jobs:
           base=https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/cloud
           name=generic_alpine-3.22.5-x86_64-bios-cloudinit-r0.qcow2
           curl -fsSLO "$base/$name" && curl -fsSLO "$base/$name.sha512"
-          sha512sum -c "$name.sha512"
+          # Alpine's .sha512 holds the bare checksum.
+          [ "$(sha512sum "$name" | cut -d' ' -f1)" = "$(tr -dc 0-9a-f < "$name.sha512")" ] && echo "sha512 matches Alpine's"
           echo "url = \"$base/$name\""
           echo "sha256 = \"$(sha256sum "$name" | cut -d' ' -f1)\""
           qemu-img convert -O raw "$name" a.raw

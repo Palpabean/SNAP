@@ -16,25 +16,27 @@
       changed_when: false
       failed_when: false
 
+    # labcheck.py rather than ip, ping and getent: the same on any lab machine image.
     - name: It has its reserved address from the router's DHCP
-      ansible.builtin.command: ip -4 -o addr show scope global
-      register: addresses
+      ansible.builtin.script: labcheck.py has {{ ansible_host }}
+      args:
+        executable: python3
       changed_when: false
-      failed_when: (ansible_host ~ '/') not in addresses.stdout
 
-    # ping.py rather than ping: the minimal cloud image has no ping.
     - name: It reaches the router
-      ansible.builtin.script: ping.py {{ router }}
+      ansible.builtin.script: labcheck.py ping {{ router }}
       args:
         executable: python3
       changed_when: false
 
     - name: The router answers DNS
-      ansible.builtin.command: getent hosts router.{{ domain }}
+      ansible.builtin.script: labcheck.py resolve router.{{ domain }}
+      args:
+        executable: python3
       changed_when: false
 
     - name: Other networks are reachable only where the policy allows
-      ansible.builtin.script: ping.py {{ item.address }}
+      ansible.builtin.script: labcheck.py ping {{ item.address }}
       args:
         executable: python3
       register: reach

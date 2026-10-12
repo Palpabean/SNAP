@@ -321,7 +321,7 @@ def preflight(ctx: Context) -> list[str]:
     problems = []
     if not ctx.host.exists(f"{ctx.payload}/{OPNSENSE_ARCHIVE}") and not template_done(ctx):
         problems.append(f"the OPNsense image is missing from {ctx.payload}/images; rebuild the USB stick")
-    for name in (("tofu", "main.tf"), ("ansible", "router.yml"), ("ansible", "verify.yml"), ("ansible", "ping.py")):
+    for name in (("tofu", "main.tf"), ("ansible", "router.yml"), ("ansible", "verify.yml"), ("ansible", "labcheck.py")):
         if not ctx.host.exists(_source(ctx, "stages", "pop", *name)):
             problems.append(f"{'/'.join(name)} is missing from the engine; rebuild the USB stick")
     if not ctx.host.exists(crackle_tools.API_SECRET):
