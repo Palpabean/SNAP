@@ -255,6 +255,8 @@ def test_pop_builds_the_lab(host):
     assert host.read(pop.IMPORTED).strip() == "cd0"
     assert {101, 102, 103} <= set(host.vms)
     assert host.playbooks == ["router.yml", "verify.yml"]
+    # The script the lab check runs on the machines sits next to the playbook, where Ansible looks.
+    assert host.read(f"{pop.ANSIBLE_DIR}/labcheck.py") == (PACKAGE / "ansible/labcheck.py").read_text()
     # Secrets stay root-only, and the config.xml (with the hashed key) is not left lying around.
     api = json.loads(host.read(pop.API_FILE))
     assert len(api["key"]) > 40 and host.path(pop.API_FILE).stat().st_mode & 0o777 == 0o600

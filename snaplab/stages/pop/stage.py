@@ -226,10 +226,15 @@ def make_router(ctx: Context) -> None:
 # --- 6. router settings through the API (Ansible) ----------------------------
 
 
+# Files the playbooks use, copied next to them (verify.yml runs labcheck.py on the machines).
+PLAYBOOK_FILES = ["labcheck.py"]
+
+
 def _playbook(ctx: Context, name: str, *args: str) -> None:
     ctx.host.mkdir(ANSIBLE_DIR, mode=0o700)
     playbook = f"{ANSIBLE_DIR}/{name}"
-    ctx.host.write(playbook, ctx.host.read(_source(ctx, "stages", "pop", "ansible", name)) or "")
+    for file in (name, *PLAYBOOK_FILES):
+        ctx.host.write(f"{ANSIBLE_DIR}/{file}", ctx.host.read(_source(ctx, "stages", "pop", "ansible", file)) or "")
     ctx.host.run(*ENV, "ansible-playbook", playbook, *args)
 
 
