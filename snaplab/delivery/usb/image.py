@@ -102,8 +102,23 @@ def read_file(iso: Path, path: str) -> str:
     return read_bytes(iso, path).decode()
 
 
-def replace_boot_menu(prepared_iso: Path, files: dict[str, bytes], out: Path) -> None:
-    """Copy the ISO and replace or add `files` (ISO path to content), leaving its boot setup untouched.
+def extents(iso: Path, path: str) -> list[tuple[int, int]]:
+    """Where a file's data lies in the ISO, as (byte offset, length) pairs."""
+    out = run(["xorriso", "-indev", str(iso), "-find", path, "-exec", "report_lba", "--"]).stdout
+    found = []
+    for line in out.splitlines():
+        # File data lba:  0 ,  33468 ,  314439 ,  643975168 , '/pve-installer.squashfs'
+        if line.startswith("File data lba:"):
+            fields = [f.strip() for f in line.split(":", 1)[1].split(",")]
+            found.append((int(fields[1]) * 2048, int(fields[3])))
+    if not found:
+        raise ImageError(f"{path} is not in {iso.name}")
+    return found
+
+
+def replace_boot_menu(prepared_iso: Path, files: dict[str, bytes | Path], out: Path) -> None:
+    """Copy the ISO and replace or add `files` (ISO path to content or a local file), leaving
+    its boot setup untouched.
 
     The change is appended as a new ISO session instead of rebuilding the image,
     so the boot code, partition tables and El Torito records stay byte for byte
@@ -115,8 +130,11 @@ def replace_boot_menu(prepared_iso: Path, files: dict[str, bytes], out: Path) ->
     with tempfile.TemporaryDirectory() as tmp:
         maps = []
         for i, (iso_path, content) in enumerate(files.items()):
-            local = Path(tmp) / str(i)
-            local.write_bytes(content)
+            if isinstance(content, Path):
+                local = content
+            else:
+                local = Path(tmp) / str(i)
+                local.write_bytes(content)
             maps += ["-map", str(local), iso_path]
         run(["xorriso", "-dev", str(out), "-boot_image", "any", "keep", "-volume_date", "uuid", uuid, *maps, "-commit"])
     if iso_uuid(out) != uuid:
@@ -124,6 +142,22 @@ def replace_boot_menu(prepared_iso: Path, files: dict[str, bytes], out: Path) ->
     with prepared_iso.open("rb") as a, out.open("rb") as b:
         if a.read(SYSTEM_AREA) != b.read(SYSTEM_AREA):
             raise ImageError("the ISO's boot code or partition table changed; refusing it")
+
+
+def blank_replaced(prepared_iso: Path, out: Path, paths: list[str]) -> None:
+    """Zero the old data of files the appended session replaced. Nothing refers to it any more,
+    but it is still in the image; zeros cost nothing once the image is compressed."""
+    for path in paths:
+        old = extents(prepared_iso, path)
+        new = extents(out, path)
+        for start, length in old:
+            if any(start < n_start + n_len and n_start < start + length for n_start, n_len in new):
+                raise ImageError(f"{path}: the new copy overlaps the old one; not blanking it")
+        with out.open("r+b") as f:
+            for start, length in old:
+                f.seek(start)
+                for done in range(0, length, 4 * MIB):
+                    f.write(bytes(min(4 * MIB, length - done)))
 
 
 def make_data(payload: Path, out: Path) -> None:

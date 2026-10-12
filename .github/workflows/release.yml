@@ -45,7 +45,7 @@ jobs:
         id: compress
         run: |
           # To standard output: xz cannot copy the image's owner (root, from the build container).
-          xz -T0 -9 --verbose --stdout snap.img > snap.img.xz
+          xz -T0 -9e --verbose --stdout snap.img > snap.img.xz
           sha256sum snap.img.xz > snap.img.xz.sha256
           ls -l snap.img snap.img.xz
           size=$(stat -c %s snap.img.xz)

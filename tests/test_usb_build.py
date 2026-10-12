@@ -21,6 +21,7 @@ import struct
 import subprocess
 import sys
 import time
+import zipfile
 import zlib
 from pathlib import Path
 
@@ -34,7 +35,7 @@ FIRSTBOOT = ROOT / "snaplab" / "stages" / "snap" / "firstboot.sh"
 OVMF_CODE = Path("/usr/share/OVMF/OVMF_CODE_4M.fd")
 OVMF_VARS = Path("/usr/share/OVMF/OVMF_VARS_4M.fd")
 
-IMAGE_TOOLS = ["xorriso", "grub-mkrescue", "mkfs.ext4", "debugfs", "sfdisk"]
+IMAGE_TOOLS = ["xorriso", "grub-mkrescue", "mkfs.ext4", "debugfs", "sfdisk", "mksquashfs", "sqfs2tar", "tar2sqfs"]
 needs_image_tools = pytest.mark.skipif(
     any(shutil.which(t) is None for t in IMAGE_TOOLS), reason="disk-image tools not installed"
 )
@@ -223,6 +224,28 @@ def released(tmp_path_factory):
     return build_stick(tmp_path_factory, None, release=True)
 
 
+def make_standin_squashfs(out: Path, tree: Path) -> None:
+    (tree / "usr/bin").mkdir(parents=True)
+    (tree / "usr/bin/tool").write_bytes(b"#!/bin/sh\necho stand-in\n" + os.urandom(200_000))
+    (tree / "usr/bin/tool").chmod(0o4755)
+    (tree / "etc").mkdir()
+    (tree / "etc/hostname").write_text("proxmox\n")
+    (tree / "etc/hostname").chmod(0o600)
+    (tree / "usr/bin/link").symlink_to("tool")
+    subprocess.run(
+        ["mksquashfs", str(tree), str(out), "-comp", "zstd", "-quiet", "-no-progress", "-all-root"],
+        check=True,
+        capture_output=True,
+    )
+
+
+def listing(squashfs: Path) -> list[str]:
+    """Each file's mode, owner, size, name and link target, through a tar listing."""
+    tar = subprocess.run(["sqfs2tar", str(squashfs)], check=True, capture_output=True).stdout
+    out = subprocess.run(["tar", "-tvf", "-", "--numeric-owner"], input=tar, check=True, capture_output=True)
+    return sorted(" ".join(line.split()[:3] + line.split()[5:]) for line in out.stdout.decode().splitlines())
+
+
 def build_stick(tmp_path_factory, config_path, **options):
     if any(shutil.which(t) is None for t in IMAGE_TOOLS):
         pytest.skip("disk-image tools not installed")
@@ -232,6 +255,9 @@ def build_stick(tmp_path_factory, config_path, **options):
     (root / "grub.cfg").write_text(STANDIN_GRUB_CFG)
     (root.parent / "linux26").write_text("stand-in kernel\n")
     (root.parent / "initrd.img").write_bytes(STANDIN_INITRD)
+    # The installer's filesystems in miniature, compressed with zstd like Proxmox's.
+    for name in build.INSTALLER_SQUASHFS:
+        make_standin_squashfs(tmp / "isoroot" / name.strip("/"), tmp / name.strip("/").replace(".", "-"))
     iso = tmp / "mirror" / "proxmox-ve_9.2-1.iso"
     iso.parent.mkdir()
     subprocess.run(["grub-mkrescue", "-o", str(iso), str(tmp / "isoroot")], check=True, capture_output=True)
@@ -252,8 +278,12 @@ def build_stick(tmp_path_factory, config_path, **options):
     tofu = tmp / "mirror" / "tofu_1_linux_amd64.zip"
     provider = tmp / "mirror" / "terraform-provider-proxmox_1_linux_amd64.zip"
     collection = tmp / "mirror" / "oxlorg-opnsense-1.tar.gz"
-    for f in (tofu, provider, collection):
-        f.write_bytes(f.name.encode())
+    for f, member in ((tofu, "tofu"), (provider, "terraform-provider-proxmox_v1")):
+        with zipfile.ZipFile(f, "w", zipfile.ZIP_DEFLATED) as z:
+            info = zipfile.ZipInfo(member)
+            info.external_attr = 0o100755 << 16  # an executable, as published
+            z.writestr(info, b"#!/bin/sh\necho stand-in\n" * 1000)
+    collection.write_bytes(collection.name.encode())
     lock = tmp / "checksums.lock"
     lock.write_text(
         f'[proxmox-ve]\nversion = "9.2-1"\nurl = "{iso.as_uri()}"\nsha256 = "{fetch.sha256(iso)}"\n'
@@ -340,6 +370,41 @@ def test_download_image_holds_no_password(released):
         part.write_bytes(f.read(data["size"] * 512))
     listing = subprocess.run(["debugfs", "-R", "ls -p /", str(part)], capture_output=True, text=True).stdout
     assert build.PASSWORD_AT_INSTALL in listing  # so the lab computer picks its own
+
+
+@needs_image_tools
+def test_tool_archives_are_repacked_with_lzma(built, tmp_path):
+    img, _ = built
+    data = partitions(img)["SNAPDATA"]
+    part = tmp_path / "data.img"
+    with img.open("rb") as f, part.open("wb") as out:
+        f.seek(data["start"] * 512)
+        out.write(f.read(data["size"] * 512))
+    packed = tmp_path / "tofu.zip"
+    packed.write_bytes(
+        subprocess.run(["debugfs", "-R", "cat /tools/opentofu.zip", str(part)], check=True, capture_output=True).stdout
+    )
+    with zipfile.ZipFile(packed) as z:
+        (info,) = z.infolist()
+        assert info.compress_type == zipfile.ZIP_LZMA and info.external_attr >> 16 == 0o100755
+        assert z.read("tofu") == b"#!/bin/sh\necho stand-in\n" * 1000
+
+
+@needs_image_tools
+def test_installer_filesystems_are_repacked_with_xz(built, tmp_path):
+    img, iso = built
+    for name in build.INSTALLER_SQUASHFS:
+        before, after = tmp_path / "before.squashfs", tmp_path / "after.squashfs"
+        before.write_bytes(image.read_bytes(iso, name))
+        after.write_bytes(image.read_bytes(img, name))
+        info = subprocess.run(["unsquashfs", "-s", str(after)], check=True, capture_output=True, text=True).stdout
+        assert "Compression xz" in info
+        assert listing(after) == listing(before)  # same files, modes, owners, sizes and links
+        # The old copy is blanked: zeros, which cost nothing in the download.
+        with img.open("rb") as f:
+            for start, length in image.extents(iso, name):
+                f.seek(start)
+                assert f.read(length).count(0) == length
 
 
 @needs_image_tools

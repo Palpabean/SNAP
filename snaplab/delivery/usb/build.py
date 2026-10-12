@@ -19,6 +19,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from importlib import resources
 from pathlib import Path
 
@@ -30,7 +31,19 @@ from snaplab.delivery.usb import debs, fetch, image, initrd, menu, wizard_files
 from snaplab.stages.snap import answer
 
 ASSISTANT = "proxmox-auto-install-assistant"
-TOOLS = [ASSISTANT, "xorriso", "mkfs.ext4", "sfdisk", "apt-get", "dpkg-deb", "openssl", "xz", "qemu-img"]
+TOOLS = [
+    ASSISTANT,
+    "xorriso",
+    "mkfs.ext4",
+    "sfdisk",
+    "apt-get",
+    "dpkg-deb",
+    "openssl",
+    "xz",
+    "qemu-img",
+    "sqfs2tar",
+    "tar2sqfs",
+]
 REPO_LOCK = Path(__file__).resolve().parents[3] / "checksums.lock"
 # What of the package goes on the stick for the host: the engine and the files
 # the stages hand to OpenTofu and Ansible.
@@ -187,6 +200,61 @@ def repack(source: Path, log=print) -> Path:
     return out
 
 
+def repack_zip(source: Path) -> Path:
+    """The same zip with LZMA instead of deflate (about a third smaller for these programs);
+    Python's zipfile, which CRACKLE unpacks with, reads it. Made once, next to the download."""
+    out = source.with_name(source.stem + ".lzma.zip")
+    if out.exists():
+        return out
+    partial = out.with_name(out.name + ".partial")
+    with zipfile.ZipFile(source) as src, zipfile.ZipFile(partial, "w") as dst:
+        for info in src.infolist():
+            content = src.read(info)
+            info.compress_type = zipfile.ZIP_LZMA  # modes and times stay in `info`
+            dst.writestr(info, content)
+    partial.replace(out)
+    return out
+
+
+# The Proxmox installer's own filesystem images, compressed with zstd. Rebuilt
+# with xz they are 614 -> 564 and 108 -> 98 MiB: with the VM images above, what
+# lets the download image fit in one 2 GiB release file. squashfs-tools-ng
+# converts through tar, which keeps owners, modes and extended attributes
+# without root; the installer's kernel reads xz squashfs.
+INSTALLER_SQUASHFS = ["/pve-installer.squashfs", "/pve-base.squashfs"]
+
+
+def repack_installer(prepared_iso: Path, iso_sha: str, cache: Path, log=print) -> dict[str, Path]:
+    """Each of the ISO's squashfs images rebuilt with xz, made once per ISO in the cache."""
+    found = {}
+    for iso_path in INSTALLER_SQUASHFS:
+        try:
+            image.extents(prepared_iso, iso_path)
+        except image.ImageError:
+            continue  # not in this ISO (the tests' stand-in has none)
+        out = cache / f"{iso_sha[:16]}-{iso_path.strip('/')}.xz"
+        if not out.exists():
+            log(f"repacking the installer's {iso_path.strip('/')} with xz (a few minutes, once)")
+            with tempfile.TemporaryDirectory(dir=cache) as tmp:
+                original = Path(tmp) / "original.squashfs"
+                image.run(
+                    ["xorriso", "-osirrox", "on", "-indev", str(prepared_iso), "-extract", iso_path, str(original)]
+                )
+                partial = Path(tmp) / "repacked.squashfs"
+                sqfs2tar = subprocess.Popen(["sqfs2tar", str(original)], stdout=subprocess.PIPE)
+                done = subprocess.run(
+                    ["tar2sqfs", "--quiet", "--compressor", "xz",
+                     "--comp-extra", "level=9,extreme,x86", "--block-size", "1048576", str(partial)],
+                    stdin=sqfs2tar.stdout, capture_output=True,
+                )  # fmt: skip
+                sqfs2tar.stdout.close()
+                if sqfs2tar.wait() != 0 or done.returncode != 0:
+                    raise BuildError(f"could not repack {iso_path}: {done.stderr.decode(errors='replace').strip()}")
+                partial.replace(out)
+        found[iso_path] = out
+    return found
+
+
 def bundle_lab_files(lock: dict, cache: Path, log=print) -> tuple[dict[str, Path], dict]:
     """Fetch the pinned VM image and tool archives; return (payload files, tools.json)."""
     files: dict[str, Path] = {}
@@ -197,8 +265,8 @@ def bundle_lab_files(lock: dict, cache: Path, log=print) -> tuple[dict[str, Path
     files[OPNSENSE_IMAGE] = repack(fetch.fetch(opn["url"], opn["sha256"], cache, log=log), log=log)
 
     tofu, provider = lock["opentofu"], lock["opentofu-provider-proxmox"]
-    files["tools/opentofu.zip"] = fetch.fetch(tofu["url"], tofu["sha256"], cache, log=log)
-    files["tools/provider-proxmox.zip"] = fetch.fetch(provider["url"], provider["sha256"], cache, log=log)
+    files["tools/opentofu.zip"] = repack_zip(fetch.fetch(tofu["url"], tofu["sha256"], cache, log=log))
+    files["tools/provider-proxmox.zip"] = repack_zip(fetch.fetch(provider["url"], provider["sha256"], cache, log=log))
     collections = []
     for c in lock["ansible-collection"]:
         archive = fetch.fetch(c["url"], c["sha256"], cache, log=log)
@@ -294,7 +362,9 @@ def build(
             )
         except (menu.MenuError, initrd.InitrdError) as e:
             raise BuildError(str(e)) from e
-        image.replace_boot_menu(prepared, menu_files, stick)
+        repacked = repack_installer(prepared, iso_sha=pve["sha256"], cache=cache, log=log)
+        image.replace_boot_menu(prepared, {**menu_files, **repacked}, stick)
+        image.blank_replaced(prepared, stick, list(repacked))
         image.assemble(stick, work / "data.img", stick)
         stick.replace(output)
 
