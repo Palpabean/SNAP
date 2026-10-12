@@ -1,6 +1,6 @@
 #!/bin/bash
 # End-to-end test with the real Proxmox ISO, in QEMU with KVM: stage 1 (SNAP),
-# then CRACKLE and POP on the installed host, whose lab VMs run nested.
+# then CRACKLE, POP and BANG on the installed host, whose lab VMs run nested.
 #
 #   tests/usb/e2e.sh snap.img bios|uefi text|wizard
 #
@@ -14,7 +14,7 @@
 # installs, and saves its choices on the new disk; its screens are saved as
 # pictures in $WORK/screens.
 # Pass 2 boots the stick again: its menu must detect the install and boot it,
-# and the first-boot handoff must copy the payload, then CRACKLE and POP run.
+# and the first-boot handoff must copy the payload, then CRACKLE, POP and BANG run.
 # The target disk is then inspected with LVM on the host.
 set -euo pipefail
 
@@ -94,12 +94,12 @@ else
     }
 fi
 
-echo "== pass 2: boot the stick again; it must start the installed system, which runs CRACKLE and POP"
+echo "== pass 2: boot the stick again; it must start the installed system, which runs CRACKLE, POP and BANG"
 qemu "$WORK/pass2.log" 110m &
 result=timeout
 for _ in $(seq 6600); do
     sleep 1
-    if grep -aq "SNAP: POP (router, networks and lab machines) done" "$WORK/pass2.log"; then result=finished; break; fi
+    if grep -aq "SNAP: Your lab is ready." "$WORK/pass2.log"; then result=finished; break; fi
     if grep -aqE "SNAP: .*(failed|missing)" "$WORK/pass2.log"; then result=failed; break; fi
     [ -s "$WORK/qemu.pid" ] && ! kill -0 "$(cat "$WORK/qemu.pid")" 2>/dev/null && { result=exited; break; }
 done
@@ -115,7 +115,7 @@ if kill "$(cat "$WORK/qemu.pid" 2>/dev/null)" 2>/dev/null; then
 fi
 wait || true
 tr -d '\r' < "$WORK/pass2.log" | grep -a "SNAP" || true
-echo "CRACKLE and POP result: $result"
+echo "CRACKLE, POP and BANG result: $result"
 
 echo "== inspect the target disk"
 loop=$(sudo losetup -f --show -P "$WORK/target.img")
@@ -127,7 +127,7 @@ sudo mount -o ro /dev/pve/root "$WORK/mnt"
 sudo cat "$WORK/mnt/var/log/snap/firstboot.log"
 sudo test -e "$WORK/mnt/var/lib/snap/progress/snap.done"
 sudo cmp "$WORK/mnt/var/lib/snap/snap.yaml" tests/usb/e2e.yaml
-sudo test -L "$WORK/mnt/etc/systemd/system/multi-user.target.wants/snap-resume.service"
+sudo test -s "$WORK/mnt/etc/systemd/system/snap-resume.service"
 sudo test -L "$WORK/mnt/etc/systemd/system/multi-user.target.wants/snap-screen.service"
 if [ "$SETUP" = wizard ]; then
     # The wizard's choices, kept for CRACKLE and POP, with the password readable by root only.
@@ -146,7 +146,7 @@ grep -aq "SNAP: starting the installed Proxmox VE." "$WORK/pass2.log" || {
     echo "e2e: the stick's menu did not detect the installed system" >&2
     exit 1
 }
-[ "$result" = finished ] || { echo "e2e: CRACKLE and POP did not finish ($result)" >&2; exit 1; }
+[ "$result" = finished ] || { echo "e2e: CRACKLE, POP and BANG did not finish ($result)" >&2; exit 1; }
 sudo test -e "$WORK/mnt/var/lib/snap/progress/crackle.done"
 # The automation tools CRACKLE installs (design decision D7).
 sudo test -x "$WORK/mnt/usr/local/bin/tofu"
@@ -158,4 +158,10 @@ sudo test -s "$WORK/mnt/var/lib/snap/secrets/proxmox-api-token"
 sudo test -e "$WORK/mnt/var/lib/snap/progress/pop.done"
 sudo test -s "$WORK/mnt/var/lib/snap/pop/router-imported"
 sudo test -s "$WORK/mnt/var/lib/snap/pop/verified.sha256"
-echo "e2e: OK ($FIRMWARE, $SETUP): installed unattended, stick booted the install, handoff, CRACKLE and POP complete"
+# BANG: checked again, summary written, Ansible's key copy gone, setup no longer starts by itself.
+sudo test -e "$WORK/mnt/var/lib/snap/progress/bang.done"
+sudo test -e "$WORK/mnt/var/lib/snap/bang/checked"
+sudo cat "$WORK/mnt/root/snap-lab.txt"
+sudo test ! -e "$WORK/mnt/var/lib/snap/pop/ansible/api.json"
+sudo test ! -e "$WORK/mnt/etc/systemd/system/multi-user.target.wants/snap-resume.service"
+echo "e2e: OK ($FIRMWARE, $SETUP): installed unattended, stick booted the install, handoff, CRACKLE, POP and BANG complete"

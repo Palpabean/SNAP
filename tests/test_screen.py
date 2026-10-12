@@ -64,7 +64,7 @@ def test_setting_up_shows_each_stage_and_the_current_step(computer):
         computer, "crackle", "running", {"proxmox-ready": "done", "package-sources": "done", "lab-bridge": "running"}
     )
     out = text(computer)
-    assert "Setting up your lab. Keep this computer on (about 60 minutes left)." in out
+    assert "Setting up your lab. Keep this computer on (about 65 minutes left)." in out
     assert "[x] SNAP     Install Proxmox" in out
     assert "[>] CRACKLE  Prepare this computer" in out
     assert "[ ] POP" in out and "[ ] BANG" in out
@@ -76,7 +76,7 @@ def test_setting_up_shows_each_stage_and_the_current_step(computer):
 
 
 def test_lab_ready_shows_how_to_log_in_and_what_was_built(computer):
-    finished(computer, "snap", "crackle", "pop")
+    finished(computer, "snap", "crackle", "pop", "bang")
     computer.write(screen.PASSWORD_FILE, "ab3k-9xqe-7tmd-p2wr\n")
     out = text(computer)
     assert "Your lab is ready.  You can remove the USB stick." in out
@@ -90,7 +90,7 @@ def test_lab_ready_shows_how_to_log_in_and_what_was_built(computer):
 
 def test_ready_screen_shows_addresses_pop_moved(computer):
     """If the home network already used 10.10.10.0/24, the screen shows where the lab went."""
-    finished(computer, "snap", "crackle", "pop")
+    finished(computer, "snap", "crackle", "pop", "bang")
     placed = {"networks": {"lab": "10.10.30.0/24", "services": "10.10.20.0/24"}, "admin": "172.31.255.0/29"}
     computer.write(addresses.PLAN_FILE, json.dumps({"for": [], "busy": [], "placed": placed}))
     out = text(computer)
@@ -98,7 +98,7 @@ def test_ready_screen_shows_addresses_pop_moved(computer):
 
 
 def test_no_password_file_points_to_the_saved_one(computer):
-    finished(computer, "snap", "crackle", "pop")
+    finished(computer, "snap", "crackle", "pop", "bang")
     assert "the one from your setup (or snap.img.password.txt)" in text(computer)
 
 
@@ -126,14 +126,14 @@ def test_logo_only_when_the_screen_is_tall_enough(computer):
 
 
 def test_screen_fits_a_small_monitor(computer):
-    finished(computer, "snap", "crackle", "pop")
+    finished(computer, "snap", "crackle", "pop", "bang")
     lines = screen.render(screen.snapshot(engine_for(computer)), 80, 25, colour=False)
     assert len(lines) <= 25 and max(len(line) for line in lines) <= 80
 
 
 def test_without_an_address_yet(computer):
     computer.address = None
-    finished(computer, "snap", "crackle", "pop")
+    finished(computer, "snap", "crackle", "pop", "bang")
     assert "https://<this computer>:8006" in text(computer)
 
 

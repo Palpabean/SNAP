@@ -2,7 +2,7 @@ name: USB end-to-end
 
 # Build a stick from the real, pinned Proxmox ISO and run it for real in QEMU
 # with KVM: unattended install, restart, stick boots the install, handoff, then
-# CRACKLE and POP on the host (the lab VMs run nested). BIOS takes the
+# CRACKLE, POP and BANG on the host (the lab VMs run nested). BIOS takes the
 # no-questions text install; UEFI runs the graphical setup wizard by itself
 # (snap.wizard=auto), with pictures of its screens kept.
 on:

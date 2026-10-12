@@ -125,6 +125,7 @@ def test_next_all_the_way_installs_the_built_in_lab(browser, site):
     assert page.inner_text("#p-pct") == "43%" and "Copying" in page.inner_text("#p-text")
     page.evaluate("SNAP.installDone()")
     assert "Proxmox is installed" in page.inner_text("main")
+    shot(page, "8-done")
     assert page.errors == []
 
 

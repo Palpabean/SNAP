@@ -439,7 +439,7 @@ const SNAP = (() => {
       nav("", '<span class="d">Restarting&hellip;</span>');
       return `<h1>Proxmox is installed</h1>
         <p class="d">The computer restarts now and SNAP continues building your lab. Leave the USB stick in; the screen shows the progress.</p>
-        <div class="card"><span class="d">Your password</span><div class="pw" style="margin-top:6px">${esc(s.password)}</div></div>`;
+        <div class="card" style="flex:none"><span class="d">Your password</span><div class="pw" style="margin-top:6px">${esc(s.password)}</div></div>`;
     },
   };
 

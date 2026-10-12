@@ -178,7 +178,7 @@ def test_status_and_cli(pve, capsys, monkeypatch):
     assert "CRACKLE (host setup): pending" in capsys.readouterr().out
     assert hostcli.main(["resume"], host=pve) == 0
     out = capsys.readouterr().out
-    assert "SNAP: CRACKLE (host setup) done" in out and "BANG" in out
+    assert "SNAP: CRACKLE (host setup) done" in out and "SNAP: Your lab is ready." in out
     assert hostcli.main(["status"], host=pve) == 0
     assert "  - Create the Ubuntu 24.04 VM template: done" in capsys.readouterr().out
     assert hostcli.main(["logs"], host=pve) == 0
