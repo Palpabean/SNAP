@@ -35,6 +35,8 @@ jobs:
         with:
           path: .snaplab-cache
           key: snaplab-cache-${{ hashFiles('checksums.lock') }}
+      - name: Tools
+        run: sudo apt-get install -y -q --no-install-recommends qemu-utils xorriso >/dev/null
       - name: Measure
         run: |
           mib() { echo "$(( $1 / 1048576 )) MiB"; }
@@ -58,6 +60,16 @@ jobs:
             echo "- router image recompressed with xz -9: $(mib "$(bzcat "$nano" | xz -T0 -9 -c | wc -c)")"
             minimal=https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-amd64.img
             echo "- Ubuntu 24.04 minimal cloud image: $(mib "$(remote "$minimal")")"
+            # Cloud images are qcow2 with light (zlib) compression inside: unpacked and xz'd instead.
+            raw_xz() { curl -fsSL -o img.qcow2 "$1" && qemu-img convert -O raw img.qcow2 img.raw && xz -T0 -9 -c img.raw | wc -c; rm -f img.qcow2 img.raw; }
+            echo "- Ubuntu 24.04 minimal, unpacked and xz -9: $(mib "$(raw_xz "$minimal")")"
+            alpine=https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/cloud/generic_alpine-3.22.5-x86_64-bios-cloudinit-r0.qcow2
+            echo "- Alpine 3.22.5 cloud-init (bios), unpacked and xz -9: $(mib "$(raw_xz "$alpine")")"
+            echo
+            echo "### Inside the Proxmox ISO (files over 5 MiB)"
+            iso=$(find .snaplab-cache -maxdepth 1 -name 'proxmox-ve_*.iso' ! -name '*-snap-*' | head -1)
+            xorriso -indev "$iso" -find / -type f -exec lsdl 2>/dev/null |
+              awk '$5 > 5242880 { printf "- %s: %d MiB\n", $NF, $5 / 1048576 }' | tr -d "'"
             base=https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/cloud
             for name in $(curl -s "$base/" | grep -o 'generic_alpine-3\.22\.[0-9]*-x86_64-[a-z]*-cloudinit-r[0-9]*\.qcow2' | sort -u); do
               echo "- Alpine $name: $(mib "$(remote "$base/$name")")"
