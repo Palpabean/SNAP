@@ -27,7 +27,9 @@ env:
 jobs:
   image:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # The first build after a new Proxmox ISO repacks its installer filesystems (about
+    # 15 minutes); later builds take them from the cache.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4

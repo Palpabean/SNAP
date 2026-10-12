@@ -243,8 +243,10 @@ def repack_installer(prepared_iso: Path, iso_sha: str, cache: Path, log=print) -
                 partial = Path(tmp) / "repacked.squashfs"
                 sqfs2tar = subprocess.Popen(["sqfs2tar", str(original)], stdout=subprocess.PIPE)
                 done = subprocess.run(
-                    ["tar2sqfs", "--quiet", "--compressor", "xz",
-                     "--comp-extra", "level=9,extreme,x86", "--block-size", "1048576", str(partial)],
+                    # The default xz level on every processor: "extreme" took far too long
+                    # (over 10 minutes for 300 MiB on one processor) for little gain.
+                    ["tar2sqfs", "--quiet", "--compressor", "xz", "--comp-extra", "x86",
+                     "--block-size", "1048576", "--num-jobs", str(os.cpu_count() or 1), str(partial)],
                     stdin=sqfs2tar.stdout, capture_output=True,
                 )  # fmt: skip
                 sqfs2tar.stdout.close()
