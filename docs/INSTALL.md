@@ -21,7 +21,7 @@ your own computer, plug it into the spare computer, and let it work.
 
 2. **Download the SNAP stick:** open the
    [latest SNAP release](https://github.com/Palpabean/SNAP/releases/latest) and click
-   **snap.img.xz** (a few GB). There is no need to unzip it.
+   **snap.img.xz** (about 2 GB). There is no need to unzip it.
 
 3. **Write the stick:** open balenaEtcher, click **Flash from file**, choose `snap.img.xz`,
    choose your USB stick, and click **Flash**.
