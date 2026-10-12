@@ -20,7 +20,10 @@ from pathlib import Path
 class CommandError(Exception):
     def __init__(self, cmd: list[str], code: int, output: str):
         self.cmd, self.code, self.output = cmd, code, output
-        tail = " / ".join(output.strip().splitlines()[-3:])
+        lines = output.strip().splitlines()
+        # The lines that say what went wrong (Ansible's "fatal:"), else the last ones.
+        key = [line.strip() for line in lines if any(m in line for m in ("fatal:", "FAILED!", "ERROR!"))]
+        tail = " / ".join(key[-3:] or lines[-3:])
         super().__init__(f"{' '.join(cmd)} failed ({code}): {tail}")
 
 

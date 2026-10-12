@@ -123,6 +123,9 @@ class Engine:
                     entry.pop("error", None)
                     self.say(f"{prefix}: done")
             except Exception as e:  # noqa: BLE001 - any failure is recorded and reported
+                output = getattr(e, "output", "")
+                if output:  # a command's full output, for the log only
+                    self.host.append(LOG_FILE, f"--- output of the failed command ---\n{output.rstrip()}\n---\n")
                 self._fail(state, record, entry, f"{step.title}: {e}")
             self.save(state)
 

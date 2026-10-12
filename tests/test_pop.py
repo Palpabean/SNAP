@@ -325,13 +325,20 @@ def test_failed_playbook_is_reported(host, monkeypatch):
 
     def dispatch(cmd):
         if "ansible-playbook" in cmd:
-            raise CommandError(list(cmd), 2, "fatal: [localhost]: FAILED! => router said no")
+            # As Ansible prints it: the failure in the middle, the summary and warnings after it.
+            output = (
+                "TASK [Set up DHCP] ***\nfatal: [localhost]: FAILED! => router said no\n"
+                "PLAY RECAP ***\nlocalhost : ok=3 failed=1\n"
+                "[WARNING]: No inventory was parsed, only implicit localhost is available\n"
+            )
+            raise CommandError(list(cmd), 2, output)
         return original(cmd)
 
     monkeypatch.setattr(host, "_dispatch", dispatch)
     assert not engine(host).resume()
     state = json.loads(host.read("/var/lib/snap/state.json"))
     assert "router said no" in state["stages"]["pop"]["steps"]["router-settings"]["error"]
+    assert "PLAY RECAP" in host.read("/var/log/snap/engine.log")  # the whole output, in the log
 
 
 def test_a_lost_machine_is_recreated(host):
