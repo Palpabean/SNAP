@@ -97,6 +97,33 @@ jobs:
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+  # Pin and inspect the Alpine cloud image (temporary: for choosing the lab machine image).
+  alpine:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download, check and look inside
+        run: |
+          sudo apt-get install -y -q --no-install-recommends qemu-utils >/dev/null
+          base=https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/cloud
+          name=generic_alpine-3.22.5-x86_64-bios-cloudinit-r0.qcow2
+          curl -fsSLO "$base/$name" && curl -fsSLO "$base/$name.sha512"
+          sha512sum -c "$name.sha512"
+          echo "url = \"$base/$name\""
+          echo "sha256 = \"$(sha256sum "$name" | cut -d' ' -f1)\""
+          qemu-img convert -O raw "$name" a.raw
+          dev=$(sudo losetup -f --show -P a.raw)
+          sudo mkdir -p /mnt/a && sudo mount "${dev}p1" /mnt/a 2>/dev/null || sudo mount "$dev" /mnt/a
+          ls /mnt/a
+          for f in bin/ping usr/bin/python3 usr/bin/cloud-init usr/bin/getent sbin/ip usr/sbin/sshd usr/bin/sudo usr/bin/doas usr/sbin/qemu-ga sbin/apk; do
+            [ -e "/mnt/a/$f" ] && echo "present: $f -> $(readlink "/mnt/a/$f")" || echo "MISSING: $f"
+          done
+          echo "--- cloud.cfg"; sudo cat /mnt/a/etc/cloud/cloud.cfg | grep -A12 -i "default_user\|system_info" | head -40
+          echo "--- sysctl"; sudo grep -rh "ping_group" /mnt/a/etc/sysctl* /mnt/a/usr/lib/sysctl.d 2>/dev/null || echo "no ping_group_range setting"
+          echo "--- doas"; sudo cat /mnt/a/etc/doas.conf /mnt/a/etc/doas.d/* 2>/dev/null
+          echo "--- cloud.cfg.d"; sudo ls /mnt/a/etc/cloud/cloud.cfg.d/
+          echo "--- services"; sudo ls /mnt/a/etc/runlevels/default /mnt/a/etc/runlevels/boot 2>/dev/null
+          sudo umount /mnt/a; sudo losetup -d "$dev"
+
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 90
