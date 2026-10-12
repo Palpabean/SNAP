@@ -11,9 +11,11 @@ import bz2
 import gzip
 import json
 import os
+import re
 import select
 import shutil
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -113,6 +115,66 @@ def test_payload_manifest_satisfies_firstboot(tmp_path):
     assert (tmp_path / "root/var/lib/snap/snap.yaml").read_bytes() == EXAMPLE.read_bytes()
 
 
+def make_release_payload(tmp_path):
+    """A payload as `build --release` makes it: locked passwords and the password-at-install flag."""
+    from snaplab.core import config, defaults
+
+    flag = tmp_path / "flag"
+    flag.write_text("no password on this stick\n")
+    cfg, locked = defaults.lock_passwords(config.load())
+    assert locked
+    payload = tmp_path / "payload"
+    build.make_payload(None, cfg, {build.PASSWORD_AT_INSTALL: flag}, payload)
+    return payload, cfg
+
+
+def firstboot(tmp_path, payload):
+    env = {**os.environ, "SNAP_ROOT": str(tmp_path / "root"), "SNAP_SOURCE": str(payload)}
+    result = subprocess.run(["bash", str(FIRSTBOOT)], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout
+    return tmp_path / "root"
+
+
+def test_downloaded_stick_gets_its_own_password_at_first_start(tmp_path):
+    payload, cfg = make_release_payload(tmp_path)
+    root = firstboot(tmp_path, payload)
+    password = (root / "etc/snap/password").read_text().strip()
+    assert re.fullmatch(r"([a-z2-9]{4}-){3}[a-z2-9]{4}", password)
+    assert stat.S_IMODE((root / "etc/snap/password").stat().st_mode) == 0o600
+    # The router and the lab machines get it too (laid over the stick's settings by `snap`).
+    chosen = json.loads((root / "etc/snap/wizard.json").read_text())
+    hashed = chosen["host"]["root_password_hash"]
+    assert chosen["machines"]["password_hash"] == hashed and hashed != cfg["host"]["root_password_hash"]
+    salt = hashed.split("$")[2]
+    again = subprocess.run(["openssl", "passwd", "-6", "-salt", salt, password], capture_output=True, text=True)
+    assert again.stdout.strip() == hashed
+    assert password not in (root / "var/log/snap/firstboot.log").read_text()  # never in the log
+
+
+def test_each_computer_gets_a_different_password(tmp_path):
+    payload, _ = make_release_payload(tmp_path)
+    first = firstboot(tmp_path / "a", payload) / "etc/snap/password"
+    second = firstboot(tmp_path / "b", payload) / "etc/snap/password"
+    assert first.read_text() != second.read_text()
+
+
+def test_guided_setup_password_is_kept(tmp_path):
+    payload, _ = make_release_payload(tmp_path)
+    root = tmp_path / "root"
+    (root / "etc/snap").mkdir(parents=True)
+    (root / "etc/snap/password").write_text("from-the-wizard\n")
+    (root / "etc/snap/wizard.json").write_text('{"host": {"hostname": "lab1"}}')
+    firstboot(tmp_path, payload)
+    assert (root / "etc/snap/password").read_text() == "from-the-wizard\n"
+    assert json.loads((root / "etc/snap/wizard.json").read_text()) == {"host": {"hostname": "lab1"}}
+
+
+def test_built_stick_keeps_its_build_password(tmp_path):
+    payload, _ = make_test_payload(tmp_path)  # not --release: no flag
+    root = firstboot(tmp_path, payload)
+    assert not (root / "etc/snap/password").exists()
+
+
 def test_engine_on_the_stick_needs_only_the_standard_library(tmp_path):
     """The host has python3 but none of the builder's packages (PyYAML, jsonschema)."""
     payload, _ = make_test_payload(tmp_path)
@@ -151,6 +213,16 @@ def test_missing_tools_are_reported(monkeypatch):
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory):
+    return build_stick(tmp_path_factory, EXAMPLE)
+
+
+@pytest.fixture(scope="module")
+def released(tmp_path_factory):
+    """The image to publish for download: the built-in lab, no password in it."""
+    return build_stick(tmp_path_factory, None, release=True)
+
+
+def build_stick(tmp_path_factory, config_path, **options):
     if any(shutil.which(t) is None for t in IMAGE_TOOLS):
         pytest.skip("disk-image tools not installed")
     tmp = tmp_path_factory.mktemp("usb")
@@ -207,7 +279,9 @@ def built(tmp_path_factory):
     mp.setattr(build, "assistant_version", lambda: "9.2.8")
     mp.setattr(build, "bundle_debs", fake_bundle_debs)
     try:
-        out = build.build(EXAMPLE, tmp / "snap.img", cache=tmp / "cache", lock_path=lock, log=lambda _: None)
+        out = build.build(
+            config_path, tmp / "snap.img", cache=tmp / "cache", lock_path=lock, log=lambda _: None, **options
+        )
     finally:
         mp.undo()
     return out, iso
@@ -250,6 +324,21 @@ def test_data_partition(built, tmp_path):
 
     assert cat("/snap.yaml") == EXAMPLE.read_bytes()
     assert b"bin/snap" in cat("/payload.sha256")
+
+
+@needs_image_tools
+def test_download_image_holds_no_password(released):
+    img, _ = released
+    assert not build.password_file(img).exists()
+    toml = (img.parent / "cache" / "last-answer.toml").read_text()
+    assert 'root-password-hashed = "$6$' in toml  # locked: a random password nobody knows
+    data = partitions(img)["SNAPDATA"]
+    with img.open("rb") as f:
+        f.seek(data["start"] * 512)
+        part = img.parent / "data.img"
+        part.write_bytes(f.read(data["size"] * 512))
+    listing = subprocess.run(["debugfs", "-R", "ls -p /", str(part)], capture_output=True, text=True).stdout
+    assert build.PASSWORD_AT_INSTALL in listing  # so the lab computer picks its own
 
 
 @needs_image_tools

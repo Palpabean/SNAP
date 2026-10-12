@@ -198,9 +198,17 @@ def build(
     lock_path: Path = REPO_LOCK,
     serial_console: bool = False,
     unattended: str | None = None,
+    release: bool = False,
     log=print,
 ) -> Path:
-    cfg, password = defaults.fill_passwords(config.load(config_path))
+    """Build the stick. `release`: an image to publish for download, the same file for everyone,
+    so it holds no password; each lab computer picks its own at first start."""
+    if release:
+        cfg, password_at_install = defaults.lock_passwords(config.load(config_path))
+        password = None
+    else:
+        cfg, password = defaults.fill_passwords(config.load(config_path))
+        password_at_install = False
     lock = fetch.load_lock(lock_path)
     cache = cache or default_cache()
     cache.mkdir(parents=True, exist_ok=True)
@@ -227,6 +235,10 @@ def build(
         repo = work / "debs"
         tools["debian_packages"] = bundle_debs(lock["ansible"], repo, log)
         files.update({f"debs/{f.name}": f for f in repo.iterdir()})
+        if password_at_install:  # read by firstboot.sh
+            flag = work / PASSWORD_AT_INSTALL
+            flag.write_text("This stick holds no password; the lab computer picks its own at first start.\n")
+            files[PASSWORD_AT_INSTALL] = flag
         make_payload(config_path, cfg, files, work / "payload", tools)
         image.make_data(work / "payload", work / "data.img")
 
@@ -263,6 +275,9 @@ def build(
         note.chmod(0o600)
         log(f"password for the lab: {password}  (also saved in {note.name})")
     return output
+
+
+PASSWORD_AT_INSTALL = "password-at-install"
 
 
 def password_file(output: Path) -> Path:

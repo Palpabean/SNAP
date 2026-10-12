@@ -1,0 +1,84 @@
+name: Download image
+
+# The ready-made USB image people download instead of building it themselves:
+# SNAP's built-in lab, built with --release (no password in it; each lab
+# computer picks its own at first start), compressed with xz, which
+# balenaEtcher and Rufus write directly.
+#
+# A tag like v1.0.0 publishes it as a GitHub release. Any other run (a push
+# that changes this workflow, or by hand) only builds it, checks it fits, and
+# keeps it as a workflow artifact for a few days. (GitHub applies `paths` to
+# branch pushes only, never to tags.)
+on:
+  push:
+    tags: ["v*"]
+    branches: ["**"]
+    paths:
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # GitHub's limit for one file in a release.
+  MAX_BYTES: "2147483648"
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .snaplab-cache
+          key: snaplab-cache-${{ hashFiles('checksums.lock') }}
+      - name: Build the builder container
+        run: docker build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
+      - name: Build the download image
+        run: |
+          docker run --rm -v "$PWD:/work" snaplab-builder build --release -o snap.img
+          sudo chown -R "$(id -u)" .snaplab-cache snap.img snap.img.sha256
+          test ! -e snap.img.password.txt  # nothing secret in a download
+      - name: Compress
+        run: |
+          xz -T0 -9 --keep --verbose snap.img
+          sha256sum snap.img.xz > snap.img.xz.sha256
+          ls -l snap.img snap.img.xz
+          size=$(stat -c %s snap.img.xz)
+          echo "### Download image" >> "$GITHUB_STEP_SUMMARY"
+          echo "snap.img: $(( $(stat -c %s snap.img) / 1048576 )) MiB, snap.img.xz: $(( size / 1048576 )) MiB" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$size" -ge "$MAX_BYTES" ]; then
+            echo "snap.img.xz is $size bytes, over GitHub's 2 GiB limit for one release file" >&2
+            exit 1
+          fi
+      - name: Keep it for a few days (runs without a tag)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: snap-download-image
+          path: |
+            snap.img.xz
+            snap.img.xz.sha256
+            snap.img.sha256
+          retention-days: 5
+          compression-level: 0
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'EOF'
+          **The ready-made SNAP USB stick.** Download `snap.img.xz`, write it to a USB stick of
+          8 GB or more with [balenaEtcher](https://etcher.balena.io/) (no need to unzip it first),
+          and start the spare computer from the stick. Step by step:
+          [docs/INSTALL.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/INSTALL.md).
+
+          This stick holds no password: each lab computer picks its own and shows it on its screen.
+
+          To check the download: `snap.img.xz.sha256` (the file you downloaded) and
+          `snap.img.sha256` (the image inside it).
+          EOF
+          gh release create "${{ github.ref_name }}" snap.img.xz snap.img.xz.sha256 snap.img.sha256 \
+            --title "SNAP ${{ github.ref_name }}" --notes-file notes.md

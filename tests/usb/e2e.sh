@@ -129,11 +129,13 @@ sudo test -e "$WORK/mnt/var/lib/snap/progress/snap.done"
 sudo cmp "$WORK/mnt/var/lib/snap/snap.yaml" tests/usb/e2e.yaml
 sudo test -s "$WORK/mnt/etc/systemd/system/snap-resume.service"
 sudo test -L "$WORK/mnt/etc/systemd/system/multi-user.target.wants/snap-screen.service"
-if [ "$SETUP" = wizard ]; then
-    # The wizard's choices, kept for CRACKLE and POP, with the password readable by root only.
+if [ "$SETUP" = wizard ] || sudo test -e "$WORK/mnt/var/lib/snap/password-at-install"; then
+    # The password chosen on this computer (by the wizard, or at first start from a download
+    # image), readable by root only, and laid over the stick's settings for CRACKLE and POP.
     sudo python3 -m json.tool "$WORK/mnt/etc/snap/wizard.json" | head -n 20
     sudo test -s "$WORK/mnt/etc/snap/password"
     [ "$(sudo stat -c %a "$WORK/mnt/etc/snap/password")" = 600 ]
+    sudo grep -q root_password_hash "$WORK/mnt/etc/snap/wizard.json"
 fi
 sudo journalctl -D "$WORK/mnt/var/log/journal" --no-pager 2>/dev/null | grep -a "SNAP:" || true
 echo "== engine log"

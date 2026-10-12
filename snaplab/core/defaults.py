@@ -95,6 +95,21 @@ def hash_password(password: str) -> str:
     return out.stdout.strip()
 
 
+def lock_passwords(cfg: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """For a stick everyone downloads: whatever has no password gets one nobody knows (a random
+    one, thrown away). The lab computer then picks its own at first start (firstboot.sh).
+    Returns the config and whether anything was locked."""
+    cfg = copy.deepcopy(cfg)
+    locked = hash_password(secrets.token_urlsafe(32))
+    missing_root = not cfg["host"].get("root_password_hash")
+    missing_lab = not cfg["machines"].get("password_hash") and not cfg["machines"].get("ssh_keys")
+    if missing_root:
+        cfg["host"]["root_password_hash"] = locked
+    if missing_lab:
+        cfg["machines"]["password_hash"] = locked
+    return cfg, missing_root or missing_lab
+
+
 def fill_passwords(cfg: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
     """Give a generated password to whatever has none; return the config and that password (or None)."""
     cfg = copy.deepcopy(cfg)
