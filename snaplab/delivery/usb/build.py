@@ -12,6 +12,7 @@ the container from snaplab/delivery/usb/Containerfile.
 
 from __future__ import annotations
 
+import bz2
 import hashlib
 import json
 import os
@@ -29,7 +30,7 @@ from snaplab.delivery.usb import debs, fetch, image, initrd, menu, wizard_files
 from snaplab.stages.snap import answer
 
 ASSISTANT = "proxmox-auto-install-assistant"
-TOOLS = [ASSISTANT, "xorriso", "mkfs.ext4", "sfdisk", "apt-get", "dpkg-deb", "openssl"]
+TOOLS = [ASSISTANT, "xorriso", "mkfs.ext4", "sfdisk", "apt-get", "dpkg-deb", "openssl", "xz", "qemu-img"]
 REPO_LOCK = Path(__file__).resolve().parents[3] / "checksums.lock"
 # What of the package goes on the stick for the host: the engine and the files
 # the stages hand to OpenTofu and Ansible.
@@ -147,16 +148,53 @@ def make_payload(
     (dest / "payload.sha256").write_text(manifest)
 
 
+# The VM disk images on the stick, as plain disk images compressed with xz: the
+# published files are a qcow2 with light zlib compression inside (Ubuntu) and
+# bzip2 (OPNsense), which take 252 and 514 MiB; repacked, 159 and 343 MiB.
+# This is what lets the download image fit in one release file.
+UBUNTU_IMAGE = "images/ubuntu-24.04-minimal-cloudimg-amd64.raw.xz"  # = crackle.stage.UBUNTU_IMAGE
+OPNSENSE_IMAGE = "images/opnsense-nano-amd64.img.xz"  # = pop.stage.OPNSENSE_ARCHIVE
+QCOW2_MAGIC = b"QFI\xfb"
+
+
+def repack(source: Path, log=print) -> Path:
+    """`source` (qcow2, .bz2 or raw) as a raw disk image compressed with xz -9, made once
+    next to it in the download cache."""
+    out = source.with_name(source.name + ".raw.xz")
+    if out.exists():
+        return out
+    log(f"repacking {source.name} (a few minutes, once)")
+    raw = source.with_name(source.name + ".raw")
+    try:
+        with source.open("rb") as f:
+            magic = f.read(4)
+        if magic == QCOW2_MAGIC:
+            image.run(["qemu-img", "convert", "-O", "raw", str(source), str(raw)])
+        elif source.suffix == ".bz2":
+            with bz2.open(source) as src, raw.open("wb") as dst:
+                shutil.copyfileobj(src, dst, length=4 * 1024 * 1024)
+        else:
+            shutil.copyfile(source, raw)
+        tmp = out.with_name(out.name + ".partial")
+        with tmp.open("wb") as dst:
+            done = subprocess.run(["xz", "-T0", "-9", "--stdout", str(raw)], stdout=dst, stderr=subprocess.PIPE)
+        if done.returncode != 0:
+            tmp.unlink(missing_ok=True)
+            raise BuildError(f"xz could not compress {source.name}: {done.stderr.decode(errors='replace').strip()}")
+        tmp.replace(out)
+    finally:
+        raw.unlink(missing_ok=True)
+    return out
+
+
 def bundle_lab_files(lock: dict, cache: Path, log=print) -> tuple[dict[str, Path], dict]:
     """Fetch the pinned VM image and tool archives; return (payload files, tools.json)."""
     files: dict[str, Path] = {}
     ubuntu = lock["ubuntu-cloud-image"]
-    files["images/ubuntu-24.04-minimal-cloudimg-amd64.img"] = fetch.fetch(
-        ubuntu["url"], ubuntu["sha256"], cache, log=log
-    )
+    files[UBUNTU_IMAGE] = repack(fetch.fetch(ubuntu["url"], ubuntu["sha256"], cache, log=log), log=log)
 
     opn = lock["opnsense"]
-    files["images/opnsense-nano-amd64.img.bz2"] = fetch.fetch(opn["url"], opn["sha256"], cache, log=log)
+    files[OPNSENSE_IMAGE] = repack(fetch.fetch(opn["url"], opn["sha256"], cache, log=log), log=log)
 
     tofu, provider = lock["opentofu"], lock["opentofu-provider-proxmox"]
     files["tools/opentofu.zip"] = fetch.fetch(tofu["url"], tofu["sha256"], cache, log=log)

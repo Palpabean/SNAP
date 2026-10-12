@@ -1,4 +1,5 @@
 import json
+import lzma
 import os
 import stat
 import zipfile
@@ -23,7 +24,8 @@ COLLECTIONS = [
 
 def stock_payload(host):
     """What the stick brings: the image, tool archives, Debian packages and tools.json."""
-    host.write(IMAGE, "fake qcow2")
+    host.write(IMAGE, "")
+    host.path(IMAGE).write_bytes(lzma.compress(b"fake disk" + bytes(9 * 1024 * 1024) + b"end"))
     payload = host.path("/var/lib/snap")
     (payload / "tools").mkdir(parents=True)
     with zipfile.ZipFile(payload / "tools/opentofu.zip", "w") as z:
@@ -81,7 +83,8 @@ def test_crackle_sets_up_a_fresh_host(pve):
     # Template from the shipped image, on the lab bridge.
     vm = pve.vms[crackle.UBUNTU_VMID]
     assert vm["template"] == "1" and vm["name"] == crackle.UBUNTU_NAME
-    assert f"import-from=/var/lib/snap/{crackle.UBUNTU_IMAGE}" in vm["scsi0"]
+    assert f"import-from={crackle.UBUNTU_RAW}" in vm["scsi0"]
+    assert not pve.exists(crackle.UBUNTU_RAW)  # the unpacked copy is removed after the import
     assert vm["net0"] == "virtio,bridge=vmbr1"
 
 

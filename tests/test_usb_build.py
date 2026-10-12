@@ -10,6 +10,7 @@ also need QEMU and OVMF. CI's usb-image job installs all of them.
 import bz2
 import gzip
 import json
+import lzma
 import os
 import re
 import select
@@ -572,13 +573,21 @@ def test_tools_travel_on_the_stick(built, tmp_path):
         "tools/provider-proxmox.zip",
         "debs/Packages",
         "tools.json",
-        "images/opnsense-nano-amd64.img.bz2",
+        build.OPNSENSE_IMAGE,
+        build.UBUNTU_IMAGE,
         "lib/snaplab/stages/pop/tofu/main.tf",
         "lib/snaplab/stages/pop/ansible/router.yml",
         "lib/snaplab/stages/pop/ansible/verify.yml",
     ):
         assert name in manifest
     assert "collections/oxlorg-opnsense-1.tar.gz" in manifest
+    # The VM images, repacked as xz, unpack to exactly what was downloaded.
+    for name, original in (
+        (build.OPNSENSE_IMAGE, b"stand-in router image"),
+        (build.UBUNTU_IMAGE, b"stand-in cloud image"),
+    ):
+        packed = subprocess.run(["debugfs", "-R", f"cat /{name}", str(part)], check=True, capture_output=True).stdout
+        assert lzma.decompress(packed) == original
     tools_json = json.loads(
         subprocess.run(["debugfs", "-R", "cat /tools.json", str(part)], check=True, capture_output=True).stdout
     )

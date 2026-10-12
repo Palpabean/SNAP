@@ -23,7 +23,8 @@ FILE_CONTENT = {"iso", "vztmpl", "backup", "snippets", "import"}
 
 UBUNTU_VMID = 9000
 UBUNTU_NAME = "snap-ubuntu-2404"
-UBUNTU_IMAGE = "images/ubuntu-24.04-minimal-cloudimg-amd64.img"
+UBUNTU_IMAGE = "images/ubuntu-24.04-minimal-cloudimg-amd64.raw.xz"  # repacked by the builder
+UBUNTU_RAW = "/var/lib/snap/crackle/ubuntu-24.04-minimal.raw"
 
 NO_SUBSCRIPTION = "/etc/apt/sources.list.d/pve-no-subscription.sources"
 SOURCES_DIR = "/etc/apt/sources.list.d"
@@ -180,7 +181,15 @@ def make_template(ctx: Context) -> None:
         if not re.search(rf"^name: {UBUNTU_NAME}$", config, re.M):
             raise RuntimeError(f"VM {vmid} already exists and is not SNAP's; free that ID and resume")
         ctx.host.run("qm", "destroy", vmid, "--purge", "1", "--destroy-unreferenced-disks", "1")
-    image = f"{ctx.payload}/{UBUNTU_IMAGE}"
+    ctx.host.unpack(f"{ctx.payload}/{UBUNTU_IMAGE}", UBUNTU_RAW)
+    try:
+        _create_template(ctx, vmid)
+    finally:
+        ctx.host.remove(UBUNTU_RAW)
+
+
+def _create_template(ctx: Context, vmid: str) -> None:
+    image = UBUNTU_RAW
     ctx.host.run(
         "qm", "create", vmid,
         "--name", UBUNTU_NAME,

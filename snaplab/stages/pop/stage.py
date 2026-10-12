@@ -22,7 +22,7 @@ from snaplab.stages.pop import addresses, lab, network, opnsense
 
 OPNSENSE_VMID = 9001
 OPNSENSE_NAME = "snap-opnsense-261"
-OPNSENSE_ARCHIVE = "images/opnsense-nano-amd64.img.bz2"
+OPNSENSE_ARCHIVE = "images/opnsense-nano-amd64.img.xz"  # repacked by the builder
 
 WORK = "/var/lib/snap/pop"
 TOFU_DIR = f"{WORK}/tofu"
@@ -81,7 +81,7 @@ def make_template(ctx: Context) -> None:
             raise RuntimeError(f"VM {vmid} already exists and is not SNAP's; free that ID and resume")
         ctx.host.run("qm", "destroy", vmid, "--purge", "1", "--destroy-unreferenced-disks", "1")
     raw = f"{WORK}/opnsense-nano.img"
-    ctx.host.decompress_bz2(f"{ctx.payload}/{OPNSENSE_ARCHIVE}", raw)
+    ctx.host.unpack(f"{ctx.payload}/{OPNSENSE_ARCHIVE}", raw)
     try:
         ctx.host.run(
             "qm", "create", vmid,

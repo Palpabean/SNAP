@@ -86,7 +86,7 @@ jobs:
       - run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends xorriso grub-common grub-pc-bin grub-efi-amd64-bin \
-            mtools dosfstools e2fsprogs fdisk qemu-system-x86 ovmf lvm2
+            mtools dosfstools e2fsprogs fdisk qemu-system-x86 qemu-utils xz-utils ovmf lvm2
       - run: pip install -e '.[dev]'
       - run: pytest -v -rs tests/test_usb_build.py
         env:
