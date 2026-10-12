@@ -36,7 +36,7 @@ jobs:
           path: .snaplab-cache
           key: snaplab-cache-${{ hashFiles('checksums.lock') }}
       - name: Tools
-        run: sudo apt-get install -y -q --no-install-recommends qemu-utils xorriso >/dev/null
+        run: sudo apt-get install -y -q --no-install-recommends qemu-utils xorriso squashfs-tools unzip >/dev/null
       - name: Measure
         run: |
           mib() { echo "$(( $1 / 1048576 )) MiB"; }
@@ -68,8 +68,29 @@ jobs:
             echo
             echo "### Inside the Proxmox ISO (files over 5 MiB)"
             iso=$(find .snaplab-cache -maxdepth 1 -name 'proxmox-ve_*.iso' ! -name '*-snap-*' | head -1)
+            if [ -z "$iso" ]; then
+              iso=pve.iso
+              curl -fsSL -o "$iso" "$(python3 -c 'import tomllib; print(tomllib.load(open("checksums.lock", "rb"))["proxmox-ve"]["url"])')"
+            fi
             xorriso -indev "$iso" -find / -type f -exec lsdl 2>/dev/null |
               awk '$5 > 5242880 { printf "- %s: %d MiB\n", $NF, $5 / 1048576 }' | tr -d "'"
+            echo
+            echo "### Its squashfs images: compression now, and rebuilt with xz"
+            mkdir -p isox
+            for sq in $(xorriso -indev "$iso" -find / -name '*.squashfs' 2>/dev/null | tr -d "'"); do
+              xorriso -osirrox on -indev "$iso" -extract "$sq" "isox/$(basename "$sq")" >/dev/null 2>&1
+              f="isox/$(basename "$sq")"
+              comp=$(unsquashfs -s "$f" | grep -i 'compression' | head -1)
+              sudo unsquashfs -q -d isox/root "$f" >/dev/null
+              sudo mksquashfs isox/root isox/re.squashfs -comp xz -Xbcj x86 -b 1M -quiet -no-progress >/dev/null
+              echo "- $sq: $(mib "$(stat -c %s "$f")") ($comp); with xz: $(mib "$(stat -c %s isox/re.squashfs)")"
+              sudo rm -rf isox/root isox/re.squashfs "$f"
+            done
+            echo
+            echo "### Tool archives recompressed with xz"
+            for z in $(find .snaplab-cache -name '*.zip' 2>/dev/null); do
+              mkdir -p zx && unzip -q -o "$z" -d zx && echo "- $(basename "$z"): zip $(mib "$(stat -c %s "$z")"), tar.xz $(mib "$(tar -C zx -cf - . | xz -9e -c | wc -c)")" && rm -rf zx
+            done
             base=https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/cloud
             for name in $(curl -s "$base/" | grep -o 'generic_alpine-3\.22\.[0-9]*-x86_64-[a-z]*-cloudinit-r[0-9]*\.qcow2' | sort -u); do
               echo "- Alpine $name: $(mib "$(remote "$base/$name")")"
