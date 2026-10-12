@@ -65,9 +65,9 @@ your own computer, plug it into the spare computer, and let it work.
    in the computer's setup screen and click **Check again**.
 
 5. **Wait.** A progress bar shows the install. The computer then restarts by itself and keeps
-   setting up the lab. Leave the stick in; it knows what to do. The screen shows each step as
-   it goes. When it shows **"SNAP: POP (router, networks and lab machines) done"**, the lab is
-   ready.
+   setting up the lab. Leave the stick in; it knows what to do. The screen shows a checklist of
+   the stages, the step it is on, and roughly how long is left (press **P** there to see the
+   password again). When it says **Your lab is ready**, it is done.
 
 **No questions at all?** Pick **Install with SNAP's settings, no questions asked** in the menu
 instead. SNAP then shows the disk it will install on and erases it after 15 seconds (with more
@@ -76,7 +76,7 @@ password is the one in `snap.img.password.txt`.
 
 ## Part 3: use your lab
 
-1. The spare computer's screen shows a web address like `https://192.168.1.50:8006`. Type it into the browser on your own computer.
+1. The spare computer's screen says **Your lab is ready** and shows a web address like `https://192.168.1.50:8006`, the user name and the password. Type the address into the browser on your own computer.
 2. Your browser warns that the connection is not private. That is expected for a new lab: choose **Advanced**, then **Continue** (or **Proceed**).
 3. Log in with user name `root` and your password (from the setup screens, or from Part 1 if you picked "no questions asked").
 
@@ -86,9 +86,11 @@ You will see the lab: the router (`snap-router`) and the machines `ubuntu-01` an
 
 - **The computer does not start from the stick:** in its setup screen (often **F2** or **Delete** at start-up), turn on "USB boot". Also make sure "Virtualization" (Intel VT-x or AMD-V) is on.
 - **SNAP says it found no internal disk:** the computer's disk is not detected. Check it in the setup screen.
-- **Setup stopped with an error:** restart the computer with the stick still in. SNAP continues where it stopped.
+- **The lab computer's screen says a stage "needs attention":** it shows what happened. Press **R** to
+  try again; SNAP continues where it stopped. If it fails again, press **L** to see the log and note
+  the last lines. Restarting the computer also tries again.
 - **The setup screens say the install failed:** the screen shows what went wrong. Click
   **Try again**, or **Turn off computer** to fix the problem first (for example, a different disk).
-- **Lost the password:** for "no questions asked", it is in `snap.img.password.txt` next to
-  `snap.img`. The guided setup's password is only shown on its first screen; if it is lost,
-  start from the stick again and choose the guided setup (this erases the lab and builds it anew).
+- **Lost the password:** if you used the guided setup, the lab computer's screen shows it: on the
+  "ready" screen, or by pressing **P** while it is setting up. For "no questions asked", it is in
+  `snap.img.password.txt` next to `snap.img`.

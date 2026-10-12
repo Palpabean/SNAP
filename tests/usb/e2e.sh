@@ -128,6 +128,7 @@ sudo cat "$WORK/mnt/var/log/snap/firstboot.log"
 sudo test -e "$WORK/mnt/var/lib/snap/progress/snap.done"
 sudo cmp "$WORK/mnt/var/lib/snap/snap.yaml" tests/usb/e2e.yaml
 sudo test -L "$WORK/mnt/etc/systemd/system/multi-user.target.wants/snap-resume.service"
+sudo test -L "$WORK/mnt/etc/systemd/system/multi-user.target.wants/snap-screen.service"
 if [ "$SETUP" = wizard ]; then
     # The wizard's choices, kept for CRACKLE and POP, with the password readable by root only.
     sudo python3 -m json.tool "$WORK/mnt/etc/snap/wizard.json" | head -n 20

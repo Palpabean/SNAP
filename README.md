@@ -1,50 +1,101 @@
-# snaplab
+# SNAP
 
-SNAP (Swift Network Automation Program) turns a bare computer into a self-contained virtual lab. You build a USB stick with one command, boot the computer from it, and walk away. The stick installs Proxmox VE, then builds an OPNsense router and firewall, isolated test networks and Ubuntu VMs, all without an internet connection.
+**SNAP (Swift Network Automation Program) turns a spare computer into a ready-made practice lab.**
 
-| Stage | Name | Purpose |
+You make a USB stick, start the spare computer from it, and walk away. About an hour
+later the computer is a working lab:
+
+- **Proxmox**: the free program that runs virtual computers, with a web page to manage them.
+- **A router and firewall** (OPNsense) that keeps the lab separate from your home network.
+- **Two lab networks**: one that can reach the internet, and one that is completely closed off.
+- **Two Ubuntu Linux machines**, ready to log in to.
+
+Everything comes from the stick. Nothing needs to be typed in, and the lab builds without an
+internet connection.
+
+> **The spare computer is wiped.** Use one with nothing on it you want to keep.
+
+## How it works
+
+1. **Make the stick** on your own computer (Windows, Mac or Linux). One command builds it;
+   a free program writes it to the USB stick.
+2. **Start the spare computer from the stick.** The SNAP menu appears.
+3. **Click through the setup screens.** Everything is already filled in, so you can just press
+   **Next** on each one. Write down the password shown on the first screen.
+4. **Wait.** The computer installs, restarts by itself and builds the lab. Its screen shows each
+   step as it goes.
+5. **Open your lab.** When the screen says **Your lab is ready**, type the web address it shows
+   into the browser on your own computer, and log in.
+
+**Full step-by-step guide: [docs/INSTALL.md](docs/INSTALL.md)**
+
+## What you need
+
+- Your own computer with about 10 GB of free space, and [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+- A USB stick of 8 GB or more (it is erased).
+- The spare computer: 16 GB of memory (8 GB at the very least), a disk of 128 GB or more,
+  virtualization turned on in its setup screen (the setup screens check this for you),
+  and a network cable to your router.
+
+## The four stages
+
+SNAP builds the lab in four stages, named after the sound of a spark. The screens show each one.
+
+| Stage | What it does | Ready? |
 | :--- | :--- | :--- |
-| 1 | **SNAP** | Check the hardware, collect settings, install Proxmox unattended |
-| 2 | **CRACKLE** | Configure the Proxmox host and prepare the VM images |
-| 3 | **POP** | Build the router, firewall, virtual networks and test VMs |
-| 4 | **BANG** | Final checks, secret cleanup, and "your lab is ready" |
+| **SNAP** | The USB stick: checks the computer, asks its questions, installs Proxmox | Yes |
+| **CRACKLE** | Prepares the new Proxmox computer and the tools that build the lab | Yes |
+| **POP** | Builds the router, the networks and the Ubuntu machines, then checks they work | Yes |
+| **BANG** | Final checks and clean-up | Not yet (coming in a later version) |
 
-**Status:** proof of concept, milestone M3. The USB stick installs Proxmox VE unattended (no config file needed: SNAP has a built-in lab, and asks on the computer only which disk to use when there is more than one), hands off to the installed system, and runs CRACKLE: package sources, the internal lab bridge, storage, an Ubuntu 24.04 VM template, and the automation tools (OpenTofu with the Proxmox provider, Ansible with its collections, and a least-privilege API token), all offline. Then POP builds the lab: an OPNsense router whose config is imported unattended over its serial console, DHCP and firewall rules per network through its API with Ansible, the Ubuntu lab machines with OpenTofu, and a check from inside the lab. Lab address ranges that clash with the home network move by themselves. BANG comes next. On the host, `snap status` shows progress and `snap logs` the engine log.
+The lab is fully usable once POP finishes. Every stage is tested automatically by installing
+the whole thing on a virtual computer, from the stick to the ready lab.
 
-## Build a stick
+## If something goes wrong
 
-You need Linux (or WSL) with podman or docker, and a USB stick of 4 GB or more.
+The lab computer's screen says what happened and what to try. Usually that means pressing
+**R** to try again: SNAP continues from where it stopped and never starts over on its own.
+More help is at the end of [docs/INSTALL.md](docs/INSTALL.md).
 
-1. Build the image (the first build downloads the 1.7 GB Proxmox ISO and checks it against `checksums.lock`):
+## For developers
 
-   ```sh
-   podman build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
-   podman run --rm -v "$PWD:/work" snaplab-builder build -o snap.img
-   ```
+<details>
+<summary>Building, options and tests</summary>
 
-   That builds SNAP's built-in lab: two networks (`lab` with internet, `services` isolated) and two Ubuntu machines. The build ends by printing the lab's password, which it also saves in `snap.img.password.txt`. To change something, write a `snap.yaml` with just those settings (see [examples/snap.example.yaml](examples/snap.example.yaml) for all of them) and add it to the command: `build my-changes.yaml -o snap.img`.
-2. Write `snap.img` to the stick with `dd`, balenaEtcher, or Rufus (DD mode). Boot the target computer from it, with Secure Boot on or off.
-3. The stick shows the disk it will install on and **erases it** after a 15-second countdown (press Enter to choose another or cancel). If the computer has more than one internal disk, it lists them and asks which one, then asks you to type `ERASE`. USB drives are never offered.
+Build the stick (the first build downloads the Proxmox installer, about 1.7 GB, and checks it
+against `checksums.lock`):
 
-The stick installs Proxmox, restarts, boots the new system, copies what it needs, and shows *Handoff complete: you can remove the USB now.* If it is left in, it boots the installed system instead of reinstalling.
+```sh
+docker build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
+docker run --rm -v "$PWD:/work" snaplab-builder build -o snap.img
+```
 
-- Design: [docs/design/0001-architecture.md](docs/design/0001-architecture.md)
-- Example config: [examples/snap.example.yaml](examples/snap.example.yaml)
-- Schema: [snaplab/core/schema/snap.schema.json](snaplab/core/schema/snap.schema.json)
+- **Change the built-in lab:** write a `snap.yaml` with only the settings to change and add it:
+  `build my-changes.yaml -o snap.img`. All settings: [examples/snap.example.yaml](examples/snap.example.yaml),
+  schema: [snaplab/core/schema/snap.schema.json](snaplab/core/schema/snap.schema.json).
+- **No questions at all:** `--unattended text` makes "no questions asked" the menu's default;
+  `--unattended wizard` runs the setup screens with their defaults (both are for automated tests).
+- **Serial console:** `--serial-console` for computers without a screen.
+- **On the lab computer:** `snap status` shows each step, `snap logs` the log, `snap resume`
+  continues after a failure, and `snap screen` is the setup screen itself.
 
-## Development
+How it is built: [docs/design/0001-architecture.md](docs/design/0001-architecture.md).
 
-Requires Python 3.11 or newer.
+Tests need Python 3.11 or newer:
 
 ```sh
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e '.[dev]'
 ruff check . && ruff format --check .
 pytest
-snaplab validate examples/snap.example.yaml
 ```
 
-Never commit a real `snap.yaml`, ISOs or disk images. `.gitignore` covers them.
+The setup screens' tests also need Playwright (`pip install playwright`) for the page, and
+`xvfb` with `libgtk3-webkit2-perl` for the real window; they are skipped without them.
+
+Never commit a real `snap.yaml`, password files, ISOs or disk images. `.gitignore` covers them.
+
+</details>
 
 ## License
 
