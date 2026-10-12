@@ -42,16 +42,18 @@ jobs:
           sudo chown -R "$(id -u)" .snaplab-cache snap.img snap.img.sha256
           test ! -e snap.img.password.txt  # nothing secret in a download
       - name: Compress
+        id: compress
         run: |
-          xz -T0 -9 --keep --verbose snap.img
+          # To standard output: xz cannot copy the image's owner (root, from the build container).
+          xz -T0 -9 --verbose --stdout snap.img > snap.img.xz
           sha256sum snap.img.xz > snap.img.xz.sha256
           ls -l snap.img snap.img.xz
           size=$(stat -c %s snap.img.xz)
           echo "### Download image" >> "$GITHUB_STEP_SUMMARY"
           echo "snap.img: $(( $(stat -c %s snap.img) / 1048576 )) MiB, snap.img.xz: $(( size / 1048576 )) MiB" >> "$GITHUB_STEP_SUMMARY"
           if [ "$size" -ge "$MAX_BYTES" ]; then
-            echo "snap.img.xz is $size bytes, over GitHub's 2 GiB limit for one release file" >&2
-            exit 1
+            echo "too_big=true" >> "$GITHUB_OUTPUT"
+            echo "**Over GitHub's 2 GiB limit for one release file.**" >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Keep it for a few days (runs without a tag)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
@@ -64,6 +66,11 @@ jobs:
             snap.img.sha256
           retention-days: 5
           compression-level: 0
+      - name: Check it fits in a release
+        if: steps.compress.outputs.too_big == 'true'
+        run: |
+          echo "snap.img.xz is over GitHub's 2 GiB limit for one release file" >&2
+          exit 1
       - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
