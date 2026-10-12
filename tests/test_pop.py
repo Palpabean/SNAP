@@ -218,7 +218,7 @@ def host(tmp_path, cfg, monkeypatch):
     h.write(crackle_tools.API_SECRET, "snap@pve!tofu=secret\n")
     h.write(f"/var/lib/snap/{pop.OPNSENSE_ARCHIVE}", "")
     h.path(f"/var/lib/snap/{pop.OPNSENSE_ARCHIVE}").write_bytes(bz2.compress(b"nano image"))
-    for name in ("tofu/main.tf", "ansible/router.yml", "ansible/verify.yml"):
+    for name in ("tofu/main.tf", "ansible/router.yml", "ansible/verify.yml", "ansible/ping.py"):
         h.write(f"/var/lib/snap/lib/snaplab/stages/pop/{name}", (PACKAGE / name).read_text())
     imports = []
 

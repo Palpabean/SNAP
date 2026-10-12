@@ -151,7 +151,7 @@ def bundle_lab_files(lock: dict, cache: Path, log=print) -> tuple[dict[str, Path
     """Fetch the pinned VM image and tool archives; return (payload files, tools.json)."""
     files: dict[str, Path] = {}
     ubuntu = lock["ubuntu-cloud-image"]
-    files["images/ubuntu-24.04-server-cloudimg-amd64.img"] = fetch.fetch(
+    files["images/ubuntu-24.04-minimal-cloudimg-amd64.img"] = fetch.fetch(
         ubuntu["url"], ubuntu["sha256"], cache, log=log
     )
 

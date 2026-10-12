@@ -22,8 +22,11 @@
       changed_when: false
       failed_when: (ansible_host ~ '/') not in addresses.stdout
 
+    # ping.py rather than ping: the minimal cloud image has no ping.
     - name: It reaches the router
-      ansible.builtin.command: ping -c 2 -W 2 {{ router }}
+      ansible.builtin.script: ping.py {{ router }}
+      args:
+        executable: python3
       changed_when: false
 
     - name: The router answers DNS
@@ -31,7 +34,9 @@
       changed_when: false
 
     - name: Other networks are reachable only where the policy allows
-      ansible.builtin.command: ping -c 2 -W 2 {{ item.address }}
+      ansible.builtin.script: ping.py {{ item.address }}
+      args:
+        executable: python3
       register: reach
       changed_when: false
       failed_when: (reach.rc == 0) != item.reachable

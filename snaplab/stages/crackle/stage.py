@@ -23,7 +23,7 @@ FILE_CONTENT = {"iso", "vztmpl", "backup", "snippets", "import"}
 
 UBUNTU_VMID = 9000
 UBUNTU_NAME = "snap-ubuntu-2404"
-UBUNTU_IMAGE = "images/ubuntu-24.04-server-cloudimg-amd64.img"
+UBUNTU_IMAGE = "images/ubuntu-24.04-minimal-cloudimg-amd64.img"
 
 NO_SUBSCRIPTION = "/etc/apt/sources.list.d/pve-no-subscription.sources"
 SOURCES_DIR = "/etc/apt/sources.list.d"

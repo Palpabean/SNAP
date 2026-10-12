@@ -15,9 +15,12 @@ version = "9.2.8"
 # for this dated release; dated releases are removed after a while, so bump
 # this when the download disappears.
 [ubuntu-cloud-image]
-version = "24.04 (release-20260926)"
-url = "https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-amd64.img"
-sha256 = "6a81c37564db9b1ee84e141922625e1d7c5b389b99bb3c572e0243607d5bb4d2"
+# The minimal cloud image: 252 MiB instead of 596, so the download image fits
+# in one release file. It has cloud-init, SSH, sudo and Python; not ping
+# (the lab check brings its own, snaplab/stages/pop/ansible/ping.py).
+version = "24.04 minimal (release-20261008)"
+url = "https://cloud-images.ubuntu.com/minimal/releases/noble/release-20261008/ubuntu-24.04-minimal-cloudimg-amd64.img"
+sha256 = "2f119f50bf29fe40e73b69ae2a736e8210d8146796f036e0324315b6b3a777df"
 
 # The lab router (POP, design decision D2). The nano image: a ready-made disk
 # with a serial console, whose first boot offers the config importer. Must be

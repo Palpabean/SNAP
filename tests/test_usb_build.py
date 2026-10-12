@@ -96,7 +96,7 @@ def make_test_payload(tmp_path):
     image_file.write_bytes(b"fake cloud image")
     payload = tmp_path / "payload"
     cfg = config.load(EXAMPLE)
-    build.make_payload(EXAMPLE, cfg, {"images/ubuntu-24.04-server-cloudimg-amd64.img": image_file}, payload)
+    build.make_payload(EXAMPLE, cfg, {"images/ubuntu-24.04-minimal-cloudimg-amd64.img": image_file}, payload)
     return payload, cfg
 
 
@@ -107,7 +107,7 @@ def test_payload_manifest_satisfies_firstboot(tmp_path):
     assert os.access(payload / "bin" / "snap", os.X_OK)
     listed = [line.split("  ", 1)[1] for line in (payload / "payload.sha256").read_text().splitlines()]
     assert {"bin/snap", "snap.yaml", "snap.json", "lib/snaplab/hostcli.py"} <= set(listed)
-    assert "images/ubuntu-24.04-server-cloudimg-amd64.img" in listed
+    assert "images/ubuntu-24.04-minimal-cloudimg-amd64.img" in listed
 
     env = {**os.environ, "SNAP_ROOT": str(tmp_path / "root"), "SNAP_SOURCE": str(payload)}
     result = subprocess.run(["bash", str(FIRSTBOOT)], env=env, capture_output=True, text=True)
@@ -240,7 +240,7 @@ def build_stick(tmp_path_factory, config_path, **options):
     stub = bindir / build.ASSISTANT
     stub.write_text(STUB_ASSISTANT)
     stub.chmod(0o755)
-    ubuntu = tmp / "mirror" / "ubuntu-24.04-server-cloudimg-amd64.img"
+    ubuntu = tmp / "mirror" / "ubuntu-24.04-minimal-cloudimg-amd64.img"
     ubuntu.write_bytes(b"stand-in cloud image")
     nano = tmp / "mirror" / "OPNsense-1-nano-amd64.img.bz2"
     nano.write_bytes(bz2.compress(b"stand-in router image"))
