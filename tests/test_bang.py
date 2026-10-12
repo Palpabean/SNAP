@@ -69,9 +69,9 @@ def test_bang_finishes_the_lab(lab_host):
     s = json.loads(lab_host.read(bang.SUMMARY_JSON))
     assert s["web"] == "https://192.168.1.50:8006" and s["user"] == "root" and s["router"] == "snap-router"
     assert [n["name"] for n in s["networks"]] == ["lab", "services"]
-    assert [m["name"] for m in s["machines"]] == ["ubuntu-01", "ubuntu-02", "ubuntu-03"]
+    assert [m["name"] for m in s["machines"]] == ["alpine-01", "alpine-02", "alpine-03"]
     text = lab_host.read(bang.SUMMARY_TEXT)
-    assert "Open in a browser:  https://192.168.1.50:8006" in text and "ubuntu-01  10.10.10.100" in text
+    assert "Open in a browser:  https://192.168.1.50:8006" in text and "alpine-01  10.10.10.100" in text
     assert PASSWORD not in text  # the summary never holds the password
     # Clean-up: Ansible's copy of the router key is gone; what is kept is root-only.
     assert not lab_host.exists(f"{pop.ANSIBLE_DIR}/api.json")
@@ -110,7 +110,7 @@ def test_a_stopped_machine_is_started(lab_host):
         lab_host.path(path).unlink()
     messages = []
     assert engine(lab_host, messages).resume()
-    assert 102 in lab_host.running and "ubuntu-02 was not running; starting it" in messages
+    assert 102 in lab_host.running and "alpine-02 was not running; starting it" in messages
 
 
 def test_a_broken_earlier_step_stops_bang(lab_host):

@@ -27,7 +27,7 @@ networks:
 machines:
   count: 0
   name_prefix: vm
-  image: ubuntu-24.04
+  image: alpine-3.22
   network: lab
   username: labuser
   ssh_keys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample user@laptop"]

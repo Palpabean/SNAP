@@ -21,10 +21,10 @@ FILE_STORAGE = "local"
 # and disk image imports, on top of Proxmox's defaults.
 FILE_CONTENT = {"iso", "vztmpl", "backup", "snippets", "import"}
 
-UBUNTU_VMID = 9000
-UBUNTU_NAME = "snap-ubuntu-2404"
-UBUNTU_IMAGE = "images/ubuntu-24.04-minimal-cloudimg-amd64.raw.xz"  # repacked by the builder
-UBUNTU_RAW = "/var/lib/snap/crackle/ubuntu-24.04-minimal.raw"
+LAB_TEMPLATE_VMID = 9000
+LAB_TEMPLATE_NAME = "snap-alpine-322"
+LAB_IMAGE = "images/alpine-3.22-cloudinit.raw.xz"  # repacked by the builder
+LAB_RAW = "/var/lib/snap/crackle/alpine-3.22.raw"
 
 NO_SUBSCRIPTION = "/etc/apt/sources.list.d/pve-no-subscription.sources"
 SOURCES_DIR = "/etc/apt/sources.list.d"
@@ -159,7 +159,7 @@ def set_storage(ctx: Context) -> None:
     ctx.host.run("pvesm", "set", FILE_STORAGE, "--content", ",".join(content))
 
 
-# --- 5. Ubuntu template ------------------------------------------------------
+# --- 5. Lab machine template (Alpine) ------------------------------------------------------
 
 
 def _vm_config(ctx: Context, vmid: int) -> str | None:
@@ -169,31 +169,31 @@ def _vm_config(ctx: Context, vmid: int) -> str | None:
 
 
 def template_done(ctx: Context) -> bool:
-    config = _vm_config(ctx, UBUNTU_VMID)
+    config = _vm_config(ctx, LAB_TEMPLATE_VMID)
     return config is not None and re.search(r"^template: 1$", config, re.M) is not None
 
 
 def make_template(ctx: Context) -> None:
-    vmid = str(UBUNTU_VMID)
-    config = _vm_config(ctx, UBUNTU_VMID)
+    vmid = str(LAB_TEMPLATE_VMID)
+    config = _vm_config(ctx, LAB_TEMPLATE_VMID)
     if config is not None:
         # Left over from an interrupted attempt: start again, but never touch someone else's VM.
-        if not re.search(rf"^name: {UBUNTU_NAME}$", config, re.M):
+        if not re.search(rf"^name: {LAB_TEMPLATE_NAME}$", config, re.M):
             raise RuntimeError(f"VM {vmid} already exists and is not SNAP's; free that ID and resume")
         ctx.host.run("qm", "destroy", vmid, "--purge", "1", "--destroy-unreferenced-disks", "1")
-    ctx.host.unpack(f"{ctx.payload}/{UBUNTU_IMAGE}", UBUNTU_RAW)
+    ctx.host.unpack(f"{ctx.payload}/{LAB_IMAGE}", LAB_RAW)
     try:
         _create_template(ctx, vmid)
     finally:
-        ctx.host.remove(UBUNTU_RAW)
+        ctx.host.remove(LAB_RAW)
 
 
 def _create_template(ctx: Context, vmid: str) -> None:
-    image = UBUNTU_RAW
+    image = LAB_RAW
     ctx.host.run(
         "qm", "create", vmid,
-        "--name", UBUNTU_NAME,
-        "--description", "SNAP: Ubuntu 24.04 cloud image template for lab machines",
+        "--name", LAB_TEMPLATE_NAME,
+        "--description", "SNAP: Alpine Linux 3.22 cloud image template for lab machines",
         "--tags", "snap",
         "--ostype", "l26", "--cpu", "host", "--cores", "2", "--memory", "2048",
         "--scsihw", "virtio-scsi-single",
@@ -215,8 +215,8 @@ def preflight(ctx: Context) -> list[str]:
     for tool in ("pvesh", "pvesm", "qm", "ip"):
         if not ctx.host.ok("sh", "-c", f"command -v {tool}"):
             problems.append(f"{tool} is not available; is this a Proxmox VE host?")
-    if not ctx.host.exists(f"{ctx.payload}/{UBUNTU_IMAGE}"):
-        problems.append(f"the Ubuntu image is missing from {ctx.payload}/images; rebuild the USB stick")
+    if not ctx.host.exists(f"{ctx.payload}/{LAB_IMAGE}"):
+        problems.append(f"the lab machine image is missing from {ctx.payload}/images; rebuild the USB stick")
     return problems + tools.preflight(ctx)
 
 
@@ -229,7 +229,7 @@ STAGE = Stage(
         Step("package-sources", "Use the no-subscription package sources", sources_done, set_sources),
         Step("lab-bridge", f"Create the internal lab bridge {LAB_BRIDGE}", bridge_done, make_bridge),
         Step("storage", "Enable snippets and imports on local storage", storage_done, set_storage),
-        Step("ubuntu-template", "Create the Ubuntu 24.04 VM template", template_done, make_template),
+        Step("lab-template", "Create the Alpine Linux VM template", template_done, make_template),
         *tools.STEPS,
     ],
 )

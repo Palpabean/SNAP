@@ -57,8 +57,8 @@ DEFAULTS: dict[str, Any] = {
     ],
     "machines": {
         "count": 2,
-        "name_prefix": "ubuntu",
-        "image": "ubuntu-24.04",
+        "name_prefix": "alpine",
+        "image": "alpine-3.22",
         "cpu": 2,
         "memory_mb": 2048,
         "disk_gb": 20,
@@ -88,7 +88,7 @@ def generate_password() -> str:
 
 
 def hash_password(password: str) -> str:
-    """SHA-512 crypt ($6$), which Proxmox, OPNsense and Ubuntu all accept."""
+    """SHA-512 crypt ($6$), which Proxmox, OPNsense and Alpine all accept."""
     out = subprocess.run(["openssl", "passwd", "-6", "-stdin"], input=password, capture_output=True, text=True)
     if out.returncode != 0:
         raise RuntimeError(f"openssl could not hash the password: {out.stderr.strip()}")

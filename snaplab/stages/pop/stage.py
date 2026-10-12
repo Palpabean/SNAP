@@ -17,7 +17,7 @@ import time
 
 from snaplab.core.engine import Context, Stage, Step
 from snaplab.stages.crackle import tools as crackle_tools
-from snaplab.stages.crackle.stage import UBUNTU_VMID, VM_STORAGE
+from snaplab.stages.crackle.stage import LAB_TEMPLATE_VMID, VM_STORAGE
 from snaplab.stages.pop import addresses, lab, network, opnsense
 
 OPNSENSE_VMID = 9001
@@ -156,7 +156,7 @@ def make_router_config(ctx: Context) -> None:
 
 
 def _templates() -> dict[str, int]:
-    return {"opnsense": OPNSENSE_VMID, "ubuntu": UBUNTU_VMID}
+    return {"opnsense": OPNSENSE_VMID, "lab": LAB_TEMPLATE_VMID}
 
 
 def _ssh_keys(ctx: Context) -> list[str]:

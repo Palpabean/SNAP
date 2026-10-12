@@ -149,10 +149,10 @@ def make_payload(
 
 
 # The VM disk images on the stick, as plain disk images compressed with xz: the
-# published files are a qcow2 with light zlib compression inside (Ubuntu) and
-# bzip2 (OPNsense), which take 252 and 514 MiB; repacked, 159 and 343 MiB.
+# published files are a qcow2 with light zlib compression inside (the lab machine image) and
+# bzip2 (OPNsense), which take 172 and 514 MiB; repacked, 73 and 343 MiB.
 # This is what lets the download image fit in one release file.
-UBUNTU_IMAGE = "images/ubuntu-24.04-minimal-cloudimg-amd64.raw.xz"  # = crackle.stage.UBUNTU_IMAGE
+LAB_IMAGE = "images/alpine-3.22-cloudinit.raw.xz"  # = crackle.stage.LAB_IMAGE
 OPNSENSE_IMAGE = "images/opnsense-nano-amd64.img.xz"  # = pop.stage.OPNSENSE_ARCHIVE
 QCOW2_MAGIC = b"QFI\xfb"
 
@@ -190,8 +190,8 @@ def repack(source: Path, log=print) -> Path:
 def bundle_lab_files(lock: dict, cache: Path, log=print) -> tuple[dict[str, Path], dict]:
     """Fetch the pinned VM image and tool archives; return (payload files, tools.json)."""
     files: dict[str, Path] = {}
-    ubuntu = lock["ubuntu-cloud-image"]
-    files[UBUNTU_IMAGE] = repack(fetch.fetch(ubuntu["url"], ubuntu["sha256"], cache, log=log), log=log)
+    machine = lock["lab-machine-image"]
+    files[LAB_IMAGE] = repack(fetch.fetch(machine["url"], machine["sha256"], cache, log=log), log=log)
 
     opn = lock["opnsense"]
     files[OPNSENSE_IMAGE] = repack(fetch.fetch(opn["url"], opn["sha256"], cache, log=log), log=log)

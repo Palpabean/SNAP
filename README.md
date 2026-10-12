@@ -8,7 +8,7 @@ later the computer is a working lab:
 - **Proxmox**: the free program that runs virtual computers, with a web page to manage them.
 - **A router and firewall** (OPNsense) that keeps the lab separate from your home network.
 - **Two lab networks**: one that can reach the internet, and one that is completely closed off.
-- **Two Ubuntu Linux machines**, ready to log in to.
+- **Two small Linux machines** (Alpine Linux), ready to log in to.
 
 Everything comes from the stick. Nothing needs to be typed in, and the lab builds without an
 internet connection.
@@ -48,7 +48,7 @@ SNAP builds the lab in four stages, named after the sound of a spark. The screen
 | :--- | :--- | :--- |
 | **SNAP** | The USB stick: checks the computer, asks its questions, installs Proxmox | Yes |
 | **CRACKLE** | Prepares the new Proxmox computer and the tools that build the lab | Yes |
-| **POP** | Builds the router, the networks and the Ubuntu machines, then checks they work | Yes |
+| **POP** | Builds the router, the networks and the Linux machines, then checks they work | Yes |
 | **BANG** | Checks the whole lab once more, writes a summary, removes spare copies of keys and passwords | Yes |
 
 When BANG finishes, the lab computer's screen says **Your lab is ready**, and a summary of the

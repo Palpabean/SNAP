@@ -93,11 +93,11 @@ menuentry 'Install Proxmox VE (Graphical)' --class debian --class gnu-linux --cl
 def make_test_payload(tmp_path):
     from snaplab.core import config
 
-    image_file = tmp_path / "ubuntu.img"
+    image_file = tmp_path / "alpine.img"
     image_file.write_bytes(b"fake cloud image")
     payload = tmp_path / "payload"
     cfg = config.load(EXAMPLE)
-    build.make_payload(EXAMPLE, cfg, {"images/ubuntu-24.04-minimal-cloudimg-amd64.img": image_file}, payload)
+    build.make_payload(EXAMPLE, cfg, {build.LAB_IMAGE: image_file}, payload)
     return payload, cfg
 
 
@@ -108,7 +108,7 @@ def test_payload_manifest_satisfies_firstboot(tmp_path):
     assert os.access(payload / "bin" / "snap", os.X_OK)
     listed = [line.split("  ", 1)[1] for line in (payload / "payload.sha256").read_text().splitlines()]
     assert {"bin/snap", "snap.yaml", "snap.json", "lib/snaplab/hostcli.py"} <= set(listed)
-    assert "images/ubuntu-24.04-minimal-cloudimg-amd64.img" in listed
+    assert build.LAB_IMAGE in listed
 
     env = {**os.environ, "SNAP_ROOT": str(tmp_path / "root"), "SNAP_SOURCE": str(payload)}
     result = subprocess.run(["bash", str(FIRSTBOOT)], env=env, capture_output=True, text=True)
@@ -241,8 +241,8 @@ def build_stick(tmp_path_factory, config_path, **options):
     stub = bindir / build.ASSISTANT
     stub.write_text(STUB_ASSISTANT)
     stub.chmod(0o755)
-    ubuntu = tmp / "mirror" / "ubuntu-24.04-minimal-cloudimg-amd64.img"
-    ubuntu.write_bytes(b"stand-in cloud image")
+    machine = tmp / "mirror" / "generic_alpine-3.22.5-x86_64-bios-cloudinit-r0.qcow2"
+    machine.write_bytes(b"stand-in cloud image")
     nano = tmp / "mirror" / "OPNsense-1-nano-amd64.img.bz2"
     nano.write_bytes(bz2.compress(b"stand-in router image"))
 
@@ -258,7 +258,7 @@ def build_stick(tmp_path_factory, config_path, **options):
     lock.write_text(
         f'[proxmox-ve]\nversion = "9.2-1"\nurl = "{iso.as_uri()}"\nsha256 = "{fetch.sha256(iso)}"\n'
         '[proxmox-auto-install-assistant]\nversion = "9.2.8"\n'
-        + entry("ubuntu-cloud-image", ubuntu)
+        + entry("lab-machine-image", machine)
         + entry("opnsense", nano)
         + entry("opentofu", tofu)
         + entry("opentofu-provider-proxmox", provider, 'source = "registry.opentofu.org/bpg/proxmox"\n')
@@ -574,7 +574,7 @@ def test_tools_travel_on_the_stick(built, tmp_path):
         "debs/Packages",
         "tools.json",
         build.OPNSENSE_IMAGE,
-        build.UBUNTU_IMAGE,
+        build.LAB_IMAGE,
         "lib/snaplab/stages/pop/tofu/main.tf",
         "lib/snaplab/stages/pop/ansible/router.yml",
         "lib/snaplab/stages/pop/ansible/verify.yml",
@@ -584,7 +584,7 @@ def test_tools_travel_on_the_stick(built, tmp_path):
     # The VM images, repacked as xz, unpack to exactly what was downloaded.
     for name, original in (
         (build.OPNSENSE_IMAGE, b"stand-in router image"),
-        (build.UBUNTU_IMAGE, b"stand-in cloud image"),
+        (build.LAB_IMAGE, b"stand-in cloud image"),
     ):
         packed = subprocess.run(["debugfs", "-R", f"cat /{name}", str(part)], check=True, capture_output=True).stdout
         assert lzma.decompress(packed) == original

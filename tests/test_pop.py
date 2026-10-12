@@ -27,13 +27,13 @@ def cfg():
 
 def test_machines_get_ids_macs_and_reserved_addresses(cfg):
     found = lab.machines(cfg)
-    assert [m["name"] for m in found] == ["ubuntu-01", "ubuntu-02", "ubuntu-03"]
+    assert [m["name"] for m in found] == ["alpine-01", "alpine-02", "alpine-03"]
     assert [m["vmid"] for m in found] == [101, 102, 103]
     assert [m["ip"] for m in found] == ["10.10.10.100", "10.10.10.101", "10.10.10.102"]
     assert all(m["vlan"] == 10 for m in found)
     macs = [m["mac"] for m in found]
     assert len(set(macs)) == 3 and all(m.startswith("BC:24:11:") for m in macs)
-    assert lab.mac("ubuntu-01") == macs[0]  # stable across runs
+    assert lab.mac("alpine-01") == macs[0]  # stable across runs
 
 
 def test_templates_only_creates_no_machines(cfg):
@@ -43,10 +43,10 @@ def test_templates_only_creates_no_machines(cfg):
 
 
 def test_tofu_vars(cfg):
-    v = lab.tofu_vars(cfg, "pve", {"opnsense": 9001, "ubuntu": 9000}, False, extra_keys=["ssh-ed25519 AAAA host"])
+    v = lab.tofu_vars(cfg, "pve", {"opnsense": 9001, "lab": 9000}, False, extra_keys=["ssh-ed25519 AAAA host"])
     assert v["router"]["lab_vlans"] == [10, 20] and v["router"]["admin_vlan"] == opnsense.ADMIN_VLAN
     assert v["router"]["started"] is False and v["router"]["template"] == 9001
-    assert v["machines"][0]["template"] == 9000 and v["machines"][0]["mac"] == lab.mac("ubuntu-01")
+    assert v["machines"][0]["template"] == 9000 and v["machines"][0]["mac"] == lab.mac("alpine-01")
     assert v["ssh_keys"] == ["ssh-ed25519 AAAA host"]
     assert v["password_hash"] == cfg["machines"]["password_hash"]
 
@@ -99,8 +99,8 @@ def test_router_vars(cfg):
     }
     assert v["dhcp_reservations"][0] == {
         "ip": "10.10.10.100",
-        "mac": lab.mac("ubuntu-01").lower(),
-        "hostname": "ubuntu-01",
+        "mac": lab.mac("alpine-01").lower(),
+        "hostname": "alpine-01",
         "subnet": "10.10.10.0/24",
     }
 
@@ -346,7 +346,7 @@ def test_a_lost_machine_is_recreated(host):
     del host.vms[102]
     host.path(f"{PROGRESS_DIR}/pop.done").unlink()
     assert engine(host).resume()
-    assert host.vms[102]["name"] == "ubuntu-02"
+    assert host.vms[102]["name"] == "alpine-02"
 
 
 # --- addresses that clash with the network the host is on ---------------------

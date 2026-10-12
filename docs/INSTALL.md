@@ -1,7 +1,7 @@
 # Installing SNAP: step by step
 
 SNAP turns a spare computer into a ready-made virtual lab: Proxmox, a router and
-firewall, two test networks and two Ubuntu machines. You make a USB stick on
+firewall, two test networks and two small Linux machines (Alpine Linux). You make a USB stick on
 your own computer, plug it into the spare computer, and let it work.
 
 **The spare computer is wiped.** Use one with nothing on it you want to keep.
@@ -73,7 +73,7 @@ Want to see each screen before you start? They are all in [docs/screens](screens
    1. **Host**: the computer's name, time zone, keyboard, and your **password**.
       Write the password down now. You need it to log in later.
    2. **Network**: the lab's networks. Add, change or remove them if you like.
-   3. **Machines**: how many Ubuntu machines, and how big.
+   3. **Machines**: how many Linux machines, and how big.
    4. **Firewall**: what each network may reach.
    5. **Review**: pick the disk to install on, tick the box that says you understand it
       will be erased, and click **Start installation**.
@@ -98,7 +98,7 @@ lab computer's screen shows the password (if you built the stick yourself, it is
 2. Your browser warns that the connection is not private. That is expected for a new lab: choose **Advanced**, then **Continue** (or **Proceed**).
 3. Log in with user name `root` and the password the lab computer's screen shows.
 
-You will see the lab: the router (`snap-router`) and the machines `ubuntu-01` and `ubuntu-02`. To log in to an Ubuntu machine, open it and choose **Console**. The user name is `labuser` and the password is the same one.
+You will see the lab: the router (`snap-router`) and the machines `alpine-01` and `alpine-02`. To log in to a lab machine, open it and choose **Console**. The user name is `labuser` and the password is the same one.
 
 ## If something goes wrong
 

@@ -49,8 +49,8 @@ networks:
 
 machines:
   count: 3
-  name_prefix: ubuntu
-  image: ubuntu-24.04
+  name_prefix: alpine
+  image: alpine-3.22
   cpu: 2
   memory_mb: 2048
   disk_gb: 20
