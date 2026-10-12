@@ -49,7 +49,7 @@
     "host": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["hostname", "domain", "country", "timezone", "keyboard", "management", "root_password_hash", "email", "target_disk"],
+      "required": ["hostname", "domain", "country", "timezone", "keyboard", "management", "email"],
       "properties": {
         "hostname": { "$ref": "#/$defs/name" },
         "domain": {
@@ -91,7 +91,10 @@
           "then": { "required": ["mac", "address", "gateway", "dns"] },
           "else": { "not": { "anyOf": [{ "required": ["mac"] }, { "required": ["address"] }, { "required": ["gateway"] }, { "required": ["dns"] }] } }
         },
-        "root_password_hash": { "$ref": "#/$defs/password_hash" },
+        "root_password_hash": {
+          "description": "Leave out to have the builder generate a password, shown at the end of the build and saved next to the image.",
+          "$ref": "#/$defs/password_hash"
+        },
         "email": {
           "description": "Where Proxmox sends alerts.",
           "type": "string",
@@ -110,7 +113,7 @@
           }
         },
         "target_disk": {
-          "description": "The disk Proxmox is installed on. Matched by serial (preferred) or model, never by device name, which can change between boots. Values are as udev reports them (ID_SERIAL_SHORT, ID_MODEL); the wizard fills them in. A model must match exactly one disk.",
+          "description": "The disk Proxmox is installed on. Leave out to choose it on the target computer when the stick boots (one internal disk: picked after a countdown; several: a menu asks). Otherwise matched by serial (preferred) or model, never by device name, which can change between boots. Values are as udev reports them (ID_SERIAL_SHORT, ID_MODEL). A model must match exactly one disk.",
           "type": "object",
           "additionalProperties": false,
           "minProperties": 1,
@@ -213,8 +216,7 @@
           "enum": ["create", "templates-only"],
           "default": "create"
         }
-      },
-      "anyOf": [{ "required": ["password_hash"] }, { "required": ["ssh_keys"] }]
+      }
     },
     "options": {
       "type": "object",

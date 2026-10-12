@@ -21,9 +21,32 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
-      - run: shellcheck snaplab/stages/snap/*.sh snaplab/delivery/usb/*.sh tests/usb/*.sh
+      - run: shellcheck snaplab/stages/snap/*.sh snaplab/delivery/usb/*.sh snaplab/delivery/usb/wizard/*.sh tests/usb/*.sh
       - run: pytest -q
       - run: snaplab validate examples/snap.example.yaml
+
+  # The setup wizard's screens in Chromium, with a picture of each screen kept,
+  # and its real window (Perl Gtk3 + WebKit, as in the Proxmox installer) on a
+  # virtual screen.
+  wizard-screens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e '.[dev]' playwright
+      - run: python -m playwright install --with-deps chromium
+      - run: sudo apt-get install -y -q --no-install-recommends xvfb xauth libgtk3-webkit2-perl
+      - run: pytest -v tests/test_wizard_ui.py tests/test_wizard_window.py
+        env:
+          SNAPLAB_SCREENSHOTS: wizard-screens
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wizard-screens
+          path: wizard-screens/*.png
+          if-no-files-found: ignore
 
   # Check the generated answer files with Proxmox's own tool (Design 0001, D3).
   proxmox-answer:
@@ -44,9 +67,10 @@ jobs:
           apt-get install -y --no-install-recommends proxmox-auto-install-assistant
       - name: Render and validate answer files
         run: |
-          for cfg in examples/snap.example.yaml tests/fixtures/static.yaml; do
-            python3 -m snaplab answer "$cfg" -o answer.toml
-            echo "== $cfg"; cat answer.toml
+          apt-get install -y --no-install-recommends openssl
+          for cfg in examples/snap.example.yaml tests/fixtures/static.yaml ""; do
+            python3 -m snaplab answer $cfg -o answer.toml
+            echo "== ${cfg:-the built-in lab (disk chosen at boot)}"; cat answer.toml
             proxmox-auto-install-assistant validate-answer answer.toml
           done
 
@@ -67,3 +91,40 @@ jobs:
       - run: pytest -v -rs tests/test_usb_build.py
         env:
           SNAPLAB_TEST_LVM: "1"
+          SNAPLAB_SCREENSHOTS: boot-menu
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: boot-menu
+          path: boot-menu/*.png
+          if-no-files-found: ignore
+
+  # The OpenTofu configuration and Ansible playbooks POP hands to the host,
+  # checked against the pinned provider and collection (Design 0001, section 12).
+  pop-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the pinned OpenTofu
+        run: |
+          url=$(python3 -c 'import tomllib; print(tomllib.load(open("checksums.lock", "rb"))["opentofu"]["url"])')
+          sha=$(python3 -c 'import tomllib; print(tomllib.load(open("checksums.lock", "rb"))["opentofu"]["sha256"])')
+          curl -fsSL -o tofu.zip "$url"
+          echo "$sha  tofu.zip" | sha256sum -c -
+          unzip -q tofu.zip tofu -d "$RUNNER_TEMP" && echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: tofu validate
+        working-directory: snaplab/stages/pop/tofu
+        run: |
+          tofu init -backend=false -input=false
+          tofu validate
+          tofu fmt -check -diff
+      - name: Ansible syntax check
+        run: |
+          pip install -q ansible-core httpx
+          ansible-galaxy collection install oxlorg.opnsense:==26.1.11
+          ansible-playbook --syntax-check snaplab/stages/pop/ansible/router.yml
+          printf '[lab]\n' > inventory.ini
+          ansible-playbook --syntax-check -i inventory.ini snaplab/stages/pop/ansible/verify.yml

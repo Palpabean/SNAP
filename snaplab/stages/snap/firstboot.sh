@@ -24,6 +24,7 @@ LABEL=SNAPDATA
 STATE_DIR="$ROOT/var/lib/snap"
 LOG_DIR="$ROOT/var/log/snap"
 UNIT="$ROOT/etc/systemd/system/snap-resume.service"
+SCREEN_UNIT="$ROOT/etc/systemd/system/snap-screen.service"
 # Progress markers, one per finished stage; the USB boot menu reads them.
 DONE="$STATE_DIR/progress/snap.done"
 
@@ -95,11 +96,34 @@ ExecStart=/var/lib/snap/bin/snap resume
 WantedBy=multi-user.target
 EOF
 
+# The setup screen on the computer's monitor (snaplab/screen.py), in place of
+# the login prompt on the first console; Alt+F2 still gives one.
+cat >"$SCREEN_UNIT" <<'EOF'
+[Unit]
+Description=SNAP: setup progress on the computer's screen
+After=systemd-user-sessions.service
+Conflicts=getty@tty1.service
+ConditionPathExists=/var/lib/snap/bin/snap
+
+[Service]
+ExecStart=/var/lib/snap/bin/snap screen
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 mkdir -p "$(dirname "$DONE")"
 touch "$DONE"
 if [ -z "$ROOT" ]; then
     systemctl daemon-reload
     # --no-block: this script itself runs inside a first-boot unit.
-    systemctl enable --now --no-block snap-resume.service
+    systemctl enable --now --no-block snap-resume.service snap-screen.service
 fi
 say "Handoff complete: you can remove the USB now."

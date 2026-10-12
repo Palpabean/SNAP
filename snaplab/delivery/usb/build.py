@@ -21,14 +21,19 @@ import tempfile
 from importlib import resources
 from pathlib import Path
 
+import yaml
+
 import snaplab
-from snaplab.core import config
-from snaplab.delivery.usb import debs, fetch, image, menu
+from snaplab.core import config, defaults
+from snaplab.delivery.usb import debs, fetch, image, initrd, menu, wizard_files
 from snaplab.stages.snap import answer
 
 ASSISTANT = "proxmox-auto-install-assistant"
-TOOLS = [ASSISTANT, "xorriso", "mkfs.ext4", "sfdisk", "apt-get", "dpkg-deb"]
+TOOLS = [ASSISTANT, "xorriso", "mkfs.ext4", "sfdisk", "apt-get", "dpkg-deb", "openssl"]
 REPO_LOCK = Path(__file__).resolve().parents[3] / "checksums.lock"
+# What of the package goes on the stick for the host: the engine and the files
+# the stages hand to OpenTofu and Ansible.
+ENGINE_FILES = ["*.py", "*.tf", "*.yml"]
 
 
 class BuildError(Exception):
@@ -105,22 +110,31 @@ def prepare(iso: Path, answer_toml: str, firstboot: bytes, assistant: str, cache
     return prepared
 
 
-def make_payload(config_path: Path, cfg: dict, files: dict[str, Path], dest: Path, tools: dict | None = None) -> None:
+def make_payload(
+    config_path: Path | None, cfg: dict, files: dict[str, Path], dest: Path, tools: dict | None = None
+) -> None:
     """The SNAPDATA contents, copied to /var/lib/snap on the host at first boot.
 
     snap.yaml (as written) and snap.json (validated, for the host, which has no
-    YAML library), the engine (lib/snaplab, bin/snap), `files` (payload path to
+    YAML library), the engine (lib/snaplab with its OpenTofu and Ansible files,
+    bin/snap), `files` (payload path to
     source: VM images, tool archives, Debian packages), tools.json describing
     the bundled tools, and a checksum manifest over everything.
     """
     (dest / "bin").mkdir(parents=True)
-    shutil.copyfile(config_path, dest / "snap.yaml")
+    if config_path is not None:
+        shutil.copyfile(config_path, dest / "snap.yaml")
+    else:
+        (dest / "snap.yaml").write_text(
+            "# No snap.yaml was given: SNAP's built-in lab.\n" + yaml.safe_dump(cfg, sort_keys=False)
+        )
     (dest / "snap.json").write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n")
     command = dest / "bin" / "snap"
     command.write_bytes(_asset("snaplab.delivery.usb", "snap-host.sh"))
     command.chmod(0o755)
     package = Path(snaplab.__file__).parent
-    for src in package.rglob("*.py"):
+    engine_files = [p for pattern in ENGINE_FILES for p in package.rglob(pattern)]
+    for src in engine_files:
         target = dest / "lib" / "snaplab" / src.relative_to(package)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, target)
@@ -140,6 +154,9 @@ def bundle_lab_files(lock: dict, cache: Path, log=print) -> tuple[dict[str, Path
     files["images/ubuntu-24.04-server-cloudimg-amd64.img"] = fetch.fetch(
         ubuntu["url"], ubuntu["sha256"], cache, log=log
     )
+
+    opn = lock["opnsense"]
+    files["images/opnsense-nano-amd64.img.bz2"] = fetch.fetch(opn["url"], opn["sha256"], cache, log=log)
 
     tofu, provider = lock["opentofu"], lock["opentofu-provider-proxmox"]
     files["tools/opentofu.zip"] = fetch.fetch(tofu["url"], tofu["sha256"], cache, log=log)
@@ -175,14 +192,15 @@ def bundle_debs(spec: dict, repo: Path, log=print) -> dict:
 
 
 def build(
-    config_path: Path,
+    config_path: Path | None,
     output: Path,
     cache: Path | None = None,
     lock_path: Path = REPO_LOCK,
     serial_console: bool = False,
+    unattended: str | None = None,
     log=print,
 ) -> Path:
-    cfg = config.load(config_path)
+    cfg, password = defaults.fill_passwords(config.load(config_path))
     lock = fetch.load_lock(lock_path)
     cache = cache or default_cache()
     cache.mkdir(parents=True, exist_ok=True)
@@ -215,8 +233,16 @@ def build(
         log("assembling the USB image")
         stick = work / "snap.img"
         try:
-            menu_files = menu.files(image.read_file(prepared, "/boot/grub/grub.cfg"), serial_console)
-        except menu.MenuError as e:
+            pve_cfg = image.read_file(prepared, "/boot/grub/grub.cfg")
+            _, pve_initrd = menu.auto_install_entry(pve_cfg)
+            menu_files = menu.files(
+                pve_cfg,
+                image.read_bytes(prepared, pve_initrd),
+                serial_console=serial_console,
+                unattended=unattended,
+                wizard_files=wizard_files.files(cfg),
+            )
+        except (menu.MenuError, initrd.InitrdError) as e:
             raise BuildError(str(e)) from e
         image.replace_boot_menu(prepared, menu_files, stick)
         image.assemble(stick, work / "data.img", stick)
@@ -225,4 +251,19 @@ def build(
     digest = fetch.sha256(output)
     output.with_name(output.name + ".sha256").write_text(f"{digest}  {output.name}\n")
     log(f"wrote {output} ({output.stat().st_size // image.MIB} MiB, sha256 {digest})")
+    if password:
+        note = password_file(output)
+        note.write_text(
+            f"SNAP lab built as {output.name}\n\n"
+            f"Password: {password}\n\n"
+            "It logs you in as root on Proxmox (web page at https://<this computer>:8006) and on the\n"
+            f"router, and as '{cfg['machines']['username']}' on the lab machines, wherever no other\n"
+            "password was set. Keep this file private.\n"
+        )
+        note.chmod(0o600)
+        log(f"password for the lab: {password}  (also saved in {note.name})")
     return output
+
+
+def password_file(output: Path) -> Path:
+    return output.with_name(output.name + ".password.txt")

@@ -3,7 +3,8 @@
 # Runs unprivileged: the image is assembled in a file, with no loop devices.
 #
 #   podman build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
-#   podman run --rm -v "$PWD:/work" snaplab-builder build my-snap.yaml -o snap.img
+#   podman run --rm -v "$PWD:/work" snaplab-builder build -o snap.img
+#   podman run --rm -v "$PWD:/work" snaplab-builder build my-changes.yaml -o snap.img
 #
 # docker works the same way.
 FROM debian:trixie-slim
@@ -11,7 +12,7 @@ FROM debian:trixie-slim
 ARG ASSISTANT_VERSION=9.2.8
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl python3 python3-yaml python3-jsonschema \
-      xorriso e2fsprogs fdisk \
+      xorriso e2fsprogs fdisk openssl zstd \
  && curl -fsSL https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg \
       -o /usr/share/keyrings/proxmox-archive-keyring.gpg \
  && printf '%s\n' 'Types: deb' 'URIs: http://download.proxmox.com/debian/pve' 'Suites: trixie' \

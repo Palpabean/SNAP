@@ -7,7 +7,9 @@ python3 but none of the builder's packages.
 
 from __future__ import annotations
 
+import bz2
 import os
+import shutil
 import ssl
 import subprocess
 import urllib.request
@@ -18,7 +20,10 @@ from pathlib import Path
 class CommandError(Exception):
     def __init__(self, cmd: list[str], code: int, output: str):
         self.cmd, self.code, self.output = cmd, code, output
-        tail = " / ".join(output.strip().splitlines()[-3:])
+        lines = output.strip().splitlines()
+        # The lines that say what went wrong (Ansible's "fatal:"), else the last ones.
+        key = [line.strip() for line in lines if any(m in line for m in ("fatal:", "FAILED!", "ERROR!"))]
+        tail = " / ".join(key[-3:] or lines[-3:])
         super().__init__(f"{' '.join(cmd)} failed ({code}): {tail}")
 
 
@@ -101,6 +106,18 @@ class Host:
         for name in names:
             (target / name).chmod(mode)
         return names
+
+    def decompress_bz2(self, archive: str | Path, dest: str | Path) -> None:
+        """Decompress a .bz2 file to dest, via a temporary name so a cut-off run leaves no half file."""
+        target = self.path(dest)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(f".{target.name}.snap-tmp")
+        with bz2.open(self.path(archive)) as src, tmp.open("wb") as out:
+            shutil.copyfileobj(src, out, length=4 * 1024 * 1024)
+        os.replace(tmp, target)
+
+    def remove(self, path: str | Path) -> None:
+        self.path(path).unlink(missing_ok=True)
 
     def http_ok(self, url: str, headers: dict[str, str]) -> bool:
         """True if a GET succeeds. Certificates are not checked: only for this host's own API."""

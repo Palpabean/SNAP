@@ -55,10 +55,18 @@ def _network(mgmt: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Stands in for the disk chosen on the target computer when the stick boots
+# (snaplab/delivery/usb/choose-disk.sh replaces it). If that never happens, the
+# installer finds no such disk and stops before erasing anything.
+CHOOSE_AT_BOOT = "snap-choose-at-boot"
+
+
 def _disk(host: dict[str, Any]) -> dict[str, Any]:
-    disk = host["target_disk"]
+    disk = host.get("target_disk")
     values: dict[str, Any] = {"filesystem": host.get("storage", {}).get("filesystem", "ext4")}
-    if "serial" in disk:
+    if disk is None:
+        values["disk-list"] = [CHOOSE_AT_BOOT]
+    elif "serial" in disk:
         values["filter.ID_SERIAL_SHORT"] = disk["serial"]
     else:
         values["filter.ID_MODEL"] = disk["model"]

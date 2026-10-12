@@ -1,0 +1,50 @@
+/* SNAP setup wizard: the look of the GUI draft (dark, teal accent). */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #0F1720; color: #E6EDF3; font: 15px/1.4 "DejaVu Sans", "Helvetica Neue", system-ui, sans-serif; }
+.app { height: 100%; display: flex; flex-direction: column; }
+.top { display: flex; gap: 16px; align-items: center; padding: 10px 32px; border-bottom: 1px solid #263544; }
+.logo { margin: 0; font: bold 7px/7px "DejaVu Sans Mono", "Courier New", monospace; color: #E6EDF3; white-space: pre; }
+.logo .spark { color: #3B82F6; }
+.brand { margin-right: auto; display: flex; flex-direction: column; }
+.brand b { letter-spacing: .14em; color: #2DD4BF; font-size: 18px; }
+.brand span { color: #8A9BAD; font-size: 12px; }
+.steps { display: flex; gap: 6px; }
+.step { padding: 6px 12px; border-radius: 6px; color: #8A9BAD; font-size: 13px; }
+.step.on { background: #2DD4BF; color: #06231F; font-weight: 700; }
+.step.done { color: #C5D0DB; }
+main { flex: 1; overflow: auto; padding: 22px 40px; display: flex; flex-direction: column; gap: 14px; }
+h1 { margin: 0; font-size: 26px; }
+.d { margin: 0; color: #8A9BAD; }
+.r { display: flex; gap: 16px; align-items: flex-start; }
+.f { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.f label, .lbl { font-size: 12px; color: #8A9BAD; text-transform: uppercase; letter-spacing: .06em; }
+input[type=text], input[type=number], input[type=password], select {
+  height: 44px; background: #17222E; border: 1px solid #2F4152; border-radius: 6px; color: #E6EDF3; padding: 0 12px; font-size: 15px; width: 100%; }
+input:focus, select:focus, button:focus { outline: 2px solid #2DD4BF; outline-offset: 1px; }
+input.bad, select.bad { border-color: #FF8A80; }
+.err { color: #FF8A80; font-size: 13px; min-height: 0; }
+.hint { font-size: 12px; color: #8A9BAD; }
+nav { display: flex; justify-content: space-between; align-items: center; padding: 14px 40px; border-top: 1px solid #263544; }
+button { height: 44px; padding: 0 24px; border-radius: 6px; border: 1px solid #2F4152; background: #17222E; color: #E6EDF3; font-size: 15px; cursor: pointer; }
+button.p { background: #2DD4BF; color: #06231F; border: 0; font-weight: 700; }
+button.sm { height: 36px; padding: 0 14px; font-size: 13px; }
+button:disabled { opacity: .45; cursor: default; }
+.cards { display: flex; gap: 12px; flex: 1; }
+.card { flex: 1; padding: 14px; border: 1px solid #2F4152; border-radius: 8px; background: #17222E; text-align: left; height: auto; font-size: 14px; }
+.card b { display: block; margin-bottom: 4px; font-size: 15px; }
+.card.on { border: 2px solid #2DD4BF; }
+.k { display: flex; gap: 16px; padding: 10px 14px; border-bottom: 1px solid #263544; color: #C5D0DB; }
+.k i { font-style: normal; width: 90px; flex: none; color: #2DD4BF; font-weight: 700; }
+.k i.fix { color: #FF8A80; } .k i.note { color: #F5A524; }
+.x { padding: 14px; border: 1px solid #F5A524; border-radius: 8px; background: #2A2113; color: #FFD58A; }
+.pw { font: 700 22px/1 "DejaVu Sans Mono", "Courier New", monospace; letter-spacing: .08em; color: #2DD4BF; }
+.item { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid #2F4152; border-radius: 8px; background: #17222E; }
+.item b { min-width: 90px; }
+.item.on { border: 2px solid #2DD4BF; }
+.item .end { margin-left: auto; display: flex; gap: 8px; }
+.tag { font-size: 12px; padding: 3px 8px; border-radius: 4px; background: #263544; color: #C5D0DB; }
+.panel { padding: 16px; border: 1px solid #2DD4BF; border-radius: 8px; background: #121C26; display: flex; flex-direction: column; gap: 12px; }
+.bar { height: 10px; background: #263544; border-radius: 5px; overflow: hidden; }
+.bar i { display: block; height: 10px; background: #2DD4BF; width: 0; transition: width .4s; }
+.log { flex: 1; min-height: 80px; font: 12px/1.5 "DejaVu Sans Mono", "Courier New", monospace; color: #8A9BAD; background: #0A1118; border: 1px solid #263544; border-radius: 8px; padding: 12px 14px; overflow: auto; white-space: pre-wrap; }
+.hidden { display: none !important; }
