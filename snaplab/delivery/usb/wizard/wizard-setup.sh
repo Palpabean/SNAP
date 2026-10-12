@@ -16,7 +16,10 @@ cat >"$snap_root/.xinitrc" <<'EOF'
 /usr/bin/xrdb -load /.Xdefaults 2>/dev/null
 /usr/bin/X11/xsetroot -solid '#0F1720' 2>/dev/null
 openbox &
-exec /usr/bin/perl /usr/share/snap-wizard/snap-wizard.pl
+# Errors go to the system console (the installer sends this session's own
+# output to a hidden screen), so a failure shows in a serial log too.
+/usr/bin/perl /usr/share/snap-wizard/snap-wizard.pl 2>>/dev/console
+echo "SNAP wizard: window closed (exit code $?)" >/dev/console
 EOF
 chmod 755 "$snap_root/.xinitrc"
 echo "SNAP: starting the setup wizard"

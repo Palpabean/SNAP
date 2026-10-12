@@ -286,6 +286,8 @@ def ppm_to_png(ppm: bytes) -> bytes:
 
 def screenshot(monitor: Path, png: Path) -> None:
     """Save what is on the virtual screen (the themed menu, which the serial console cannot show)."""
+    png = png.absolute()  # QEMU writes the file itself
+    png.parent.mkdir(parents=True, exist_ok=True)
     ppm = png.with_suffix(".ppm")
     with socket.socket(socket.AF_UNIX) as s:
         s.connect(str(monitor))
@@ -295,7 +297,6 @@ def screenshot(monitor: Path, png: Path) -> None:
             if ppm.exists() and ppm.stat().st_size > 0:
                 break
         time.sleep(0.3)
-    png.parent.mkdir(parents=True, exist_ok=True)
     png.write_bytes(ppm_to_png(ppm.read_bytes()))
     ppm.unlink()
 

@@ -83,7 +83,7 @@ if [ "$SETUP" = wizard ]; then
     grep -a "SNAP wizard: P" "$WORK/pass1.log" | tail -n 5 || true
     grep -aq "SNAP wizard: DONE" "$WORK/pass1.log" || {
         echo "e2e: the setup wizard did not report a finished install" >&2
-        tr -d '\r' < "$WORK/pass1.log" | grep -a "SNAP wizard" | tail -n 40 >&2 || true
+        tr -d '\r' < "$WORK/pass1.log" | tail -n 80 >&2 || true
         exit 1
     }
 else

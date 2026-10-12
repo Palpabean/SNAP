@@ -25,8 +25,9 @@ jobs:
       - run: pytest -q
       - run: snaplab validate examples/snap.example.yaml
 
-  # The setup wizard's screens in Chromium (the Proxmox installer shows them with
-  # WebKit), with a picture of each screen kept.
+  # The setup wizard's screens in Chromium, with a picture of each screen kept,
+  # and its real window (Perl Gtk3 + WebKit, as in the Proxmox installer) on a
+  # virtual screen.
   wizard-screens:
     runs-on: ubuntu-latest
     steps:
@@ -36,7 +37,8 @@ jobs:
           python-version: "3.13"
       - run: pip install -e '.[dev]' playwright
       - run: python -m playwright install --with-deps chromium
-      - run: pytest -v tests/test_wizard_ui.py
+      - run: sudo apt-get install -y -q --no-install-recommends xvfb xauth libgtk3-webkit2-perl
+      - run: pytest -v tests/test_wizard_ui.py tests/test_wizard_window.py
         env:
           SNAPLAB_SCREENSHOTS: wizard-screens
       - uses: actions/upload-artifact@v4

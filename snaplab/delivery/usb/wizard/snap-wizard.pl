@@ -25,12 +25,27 @@ use lib dirname(__FILE__);
 use SnapWizard;
 
 my $DIR = dirname(__FILE__);
+my $INSTALL_MODE = @ARGV && $ARGV[0] eq '--install';
+
+# The window's libraries, loaded at start-up like `use` (as Proxmox's installer
+# does), but only for the window, so the install runs without a display.
+# Gtk3::WebKit2 makes its classes (WebView and the rest) in import().
+BEGIN {
+    unless (@ARGV && $ARGV[0] eq '--install') {
+        require Glib;
+        require Gtk3;
+        Gtk3->import('-init');
+        require Gtk3::WebKit2;
+        Gtk3::WebKit2->import();
+    }
+}
 my $ANSWER_TEMPLATE = $ENV{SNAP_ANSWER_TEMPLATE} // '/cdrom/answer.toml';
 # The paths can be moved for tests (tests/test_wizard_perl.py).
 my $ANSWERS = $ENV{SNAP_ANSWERS} // '/run/automatic-installer-answers';
 my $TARGET = $ENV{SNAP_TARGET} // '/mnt/snap-target';
 my $LOG = $ENV{SNAP_WIZARD_LOG} // '/tmp/snap-wizard.log';
 my $SYS = $ENV{SNAP_SYS} // '/sys';
+my $PROC = $ENV{SNAP_PROC} // '/proc';
 
 my $CONSOLE = $ENV{SNAP_WIZARD_CONSOLE} // '/dev/console';
 
@@ -103,18 +118,13 @@ sub run_install {
     report('DONE');
 }
 
-if (@ARGV && $ARGV[0] eq '--install') {
+if ($INSTALL_MODE) {
     run_install($ARGV[1]);
     exit 0;
 }
 
 # --- the window -----------------------------------------------------------------
 
-require Glib;
-Glib->import(qw(TRUE FALSE));
-require Gtk3;
-Gtk3->import('-init');
-require Gtk3::WebKit2;
 
 my $window = Gtk3::Window->new('toplevel');
 $window->set_title('SNAP setup');
@@ -122,6 +132,9 @@ $window->set_default_size(1024, 768);
 $window->signal_connect(destroy => sub { Gtk3->main_quit });
 my $view = Gtk3::WebKit2::WebView->new;
 $window->add($view);
+# As Proxmox's installer does: lets WebKit redraw properly without a compositor.
+my $visual = $window->get_screen->get_rgba_visual;
+$window->set_visual($visual) if $visual;
 $window->fullscreen;
 $window->show_all;
 
@@ -135,7 +148,7 @@ sub js {
 sub call { my ($fn, @args) = @_; js("SNAP.$fn(" . join(',', map { $SnapWizard::JSON->encode($_) } @args) . ')') }
 
 sub stick_device {
-    for my $line (split /\n/, SnapWizard::slurp('/proc/mounts') // '') {
+    for my $line (split /\n/, SnapWizard::slurp("$PROC/mounts") // '') {
         my ($dev, $where) = split / /, $line;
         return ($dev =~ m{^/dev/(\w+?)(\d*)$})[0] if $where eq '/cdrom' || $where eq '/cdrom/';
     }
@@ -144,8 +157,8 @@ sub stick_device {
 
 sub computer {
     my $stick = stick_device();
-    my $disks = SnapWizard::disks('/sys/block', $stick);
-    my $nics = SnapWizard::interfaces('/sys/class/net');
+    my $disks = SnapWizard::disks("$SYS/block", $stick);
+    my $nics = SnapWizard::interfaces("$SYS/class/net");
     return {
         config => $SnapWizard::JSON->decode(SnapWizard::slurp("$DIR/config.json")),
         disks => $disks,
@@ -153,9 +166,9 @@ sub computer {
         timezones => SnapWizard::timezones('/usr/share/zoneinfo'),
         checks => SnapWizard::checks(
             disks => $disks, interfaces => $nics,
-            cpuinfo => SnapWizard::slurp('/proc/cpuinfo'), meminfo => SnapWizard::slurp('/proc/meminfo'),
+            cpuinfo => SnapWizard::slurp("$PROC/cpuinfo"), meminfo => SnapWizard::slurp("$PROC/meminfo"),
         ),
-        auto => ((SnapWizard::slurp('/proc/cmdline') // '') =~ /\bsnap\.wizard=auto\b/) ? JSON::PP::true : JSON::PP::false,
+        auto => ((SnapWizard::slurp("$PROC/cmdline") // '') =~ /\bsnap\.wizard=auto\b/) ? JSON::PP::true : JSON::PP::false,
     };
 }
 
