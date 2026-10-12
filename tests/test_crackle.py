@@ -185,6 +185,15 @@ def test_status_and_cli(pve, capsys, monkeypatch):
     assert "CRACKLE (host setup) done" in capsys.readouterr().out
 
 
+def test_choices_from_the_setup_wizard_win(pve):
+    pve.write(
+        "/var/lib/snap/snap.json", json.dumps({"host": {"hostname": "snap", "email": "a@b.c"}, "networks": [1, 2]})
+    )
+    pve.write(hostcli.WIZARD_SETTINGS, json.dumps({"host": {"hostname": "lab1"}, "networks": [3]}))
+    cfg = hostcli.make_engine(pve, say=lambda _: None).ctx.cfg
+    assert cfg == {"host": {"hostname": "lab1", "email": "a@b.c"}, "networks": [3]}
+
+
 def test_automation_tools_are_installed_offline(pve):
     assert engine(pve).resume()
     # OpenTofu, with the provider as a local mirror and a config that uses it.

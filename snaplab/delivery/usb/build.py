@@ -25,7 +25,7 @@ import yaml
 
 import snaplab
 from snaplab.core import config, defaults
-from snaplab.delivery.usb import debs, fetch, image, initrd, menu
+from snaplab.delivery.usb import debs, fetch, image, initrd, menu, wizard_files
 from snaplab.stages.snap import answer
 
 ASSISTANT = "proxmox-auto-install-assistant"
@@ -197,6 +197,7 @@ def build(
     cache: Path | None = None,
     lock_path: Path = REPO_LOCK,
     serial_console: bool = False,
+    unattended: str | None = None,
     log=print,
 ) -> Path:
     cfg, password = defaults.fill_passwords(config.load(config_path))
@@ -234,7 +235,13 @@ def build(
         try:
             pve_cfg = image.read_file(prepared, "/boot/grub/grub.cfg")
             _, pve_initrd = menu.auto_install_entry(pve_cfg)
-            menu_files = menu.files(pve_cfg, image.read_bytes(prepared, pve_initrd), serial_console)
+            menu_files = menu.files(
+                pve_cfg,
+                image.read_bytes(prepared, pve_initrd),
+                serial_console=serial_console,
+                unattended=unattended,
+                wizard_files=wizard_files.files(cfg),
+            )
         except (menu.MenuError, initrd.InitrdError) as e:
             raise BuildError(str(e)) from e
         image.replace_boot_menu(prepared, menu_files, stick)

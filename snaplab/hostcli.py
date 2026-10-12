@@ -15,12 +15,17 @@ import json
 import socket
 import sys
 
+from snaplab.core import defaults
 from snaplab.core.engine import LOG_FILE, STATE_DIR, Context, Engine
 from snaplab.core.host import Host
 from snaplab.stages.crackle.stage import STAGE as CRACKLE
 from snaplab.stages.pop.stage import STAGE as POP
 
 STAGES = [CRACKLE, POP]
+# What the setup wizard on the stick saved on the new disk: the choices made on
+# its screens, laid over the stick's settings. Kept outside STATE_DIR, which the
+# handoff replaces.
+WIZARD_SETTINGS = "/etc/snap/wizard.json"
 NEXT = "BANG (final checks and the summary) is not built yet (milestone M4)."
 
 
@@ -36,6 +41,9 @@ def console(message: str) -> None:
 def make_engine(host: Host, say=console) -> Engine:
     text = host.read(f"{STATE_DIR}/snap.json")
     cfg = json.loads(text) if text else {}
+    chosen = host.read(WIZARD_SETTINGS)
+    if chosen:
+        cfg = defaults.merge(cfg, json.loads(chosen))
     node = socket.gethostname().split(".")[0]
     return Engine(STAGES, Context(host=host, cfg=cfg, node=node, say=say))
 

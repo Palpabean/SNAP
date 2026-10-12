@@ -1,23 +1,37 @@
-# SNAP boot menu theme: text only, using the font on the Proxmox ISO.
-title-text: "SNAP  -  Swift Network Automation Program"
-title-font: "Unifont Regular 16"
-title-color: "#7fdbff"
-desktop-color: "#0d1b26"
+# SNAP boot menu theme: text only, using the font on the Proxmox ISO, in the
+# colours of the setup wizard. The builder puts the logo (snaplab/core/logo.py)
+# in place of the placeholder line below: one label per line, the white art
+# and the blue spark drawn on top of each other.
+title-text: ""
+desktop-color: "#06090D"
 message-font: "Unifont Regular 16"
-message-color: "#dddddd"
+message-color: "#C5D0DB"
 terminal-font: "Unifont Regular 16"
 # Frame for text output (boot messages); GRUB fails to start an entry without one.
 terminal-box: "terminal_box_*.png"
 
+@LOGO@
+
++ label {
+    left = 50%-196
+    top = 232
+    width = 392
+    height = 20
+    align = "center"
+    text = "S N A P   -   Swift Network Automation Program"
+    font = "Unifont Regular 16"
+    color = "#2DD4BF"
+}
+
 + boot_menu {
-    left = 12%
-    top = 20%
-    width = 76%
-    height = 42%
+    left = 50%-320
+    top = 276
+    width = 640
+    height = 236
     item_font = "Unifont Regular 16"
-    item_color = "#dddddd"
+    item_color = "#C5D0DB"
     selected_item_font = "Unifont Regular 16"
-    selected_item_color = "#7fdbff"
+    selected_item_color = "#2DD4BF"
     item_height = 26
     item_spacing = 6
     item_padding = 8
@@ -25,25 +39,25 @@ terminal-box: "terminal_box_*.png"
 }
 
 + label {
-    left = 12%
-    top = 66%
-    width = 76%
+    left = 50%-320
+    top = 100%-92
+    width = 640
     height = 20
-    text = "Arrow keys to choose, Enter to start. Installing only touches the disk named in your settings."
+    text = "Arrow keys to choose, Enter to start."
     font = "Unifont Regular 16"
-    color = "#8899aa"
+    color = "#8A9BAD"
 }
 
 + progress_bar {
     id = "__timeout__"
-    left = 12%
-    top = 74%
-    width = 76%
+    left = 50%-320
+    top = 100%-60
+    width = 640
     height = 24
     font = "Unifont Regular 16"
-    text_color = "#ffffff"
-    fg_color = "#2a6f97"
-    bg_color = "#1f3344"
-    border_color = "#7fdbff"
+    text_color = "#E6EDF3"
+    fg_color = "#2DD4BF"
+    bg_color = "#263544"
+    border_color = "#2DD4BF"
     text = "Starting the highlighted entry in %d seconds"
 }

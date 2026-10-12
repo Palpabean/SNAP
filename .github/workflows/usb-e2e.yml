@@ -2,7 +2,9 @@ name: USB end-to-end
 
 # Build a stick from the real, pinned Proxmox ISO and run it for real in QEMU
 # with KVM: unattended install, restart, stick boots the install, handoff, then
-# CRACKLE and POP on the host (the lab VMs run nested).
+# CRACKLE and POP on the host (the lab VMs run nested). BIOS takes the
+# no-questions text install; UEFI runs the graphical setup wizard by itself
+# (snap.wizard=auto), with pictures of its screens kept.
 on:
   push:
     paths:
@@ -23,7 +25,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        firmware: [bios, uefi]
+        include:
+          - firmware: bios
+            setup: text
+          - firmware: uefi
+            setup: wizard
     env:
       WORK: ${{ github.workspace }}/e2e-work
     steps:
@@ -37,7 +43,7 @@ jobs:
       - name: Install QEMU and LVM
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 ovmf lvm2
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 ovmf lvm2 netpbm
       - uses: actions/cache@v4
         with:
           path: .snaplab-cache
@@ -46,15 +52,18 @@ jobs:
         run: docker build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
       - name: Build the USB image
         run: |
-          docker run --rm -v "$PWD:/work" snaplab-builder build tests/usb/e2e.yaml -o snap.img --serial-console
+          docker run --rm -v "$PWD:/work" snaplab-builder build tests/usb/e2e.yaml -o snap.img --serial-console \
+            --unattended ${{ matrix.setup }}
           sudo chown -R "$(id -u)" .snaplab-cache snap.img snap.img.sha256 snap.img.password.txt
           test -s snap.img.password.txt  # no passwords in the config: the builder made one
       - name: Install, restart, hand off
-        run: tests/usb/e2e.sh snap.img ${{ matrix.firmware }}
+        run: tests/usb/e2e.sh snap.img ${{ matrix.firmware }} ${{ matrix.setup }}
       - name: Keep the serial logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: serial-logs-${{ matrix.firmware }}
-          path: e2e-work/*.log
+          path: |
+            e2e-work/*.log
+            e2e-work/screens/*.png
           if-no-files-found: ignore

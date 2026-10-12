@@ -1,9 +1,10 @@
-"""The disk prompt's small extra initrd (Design 0001, section 5.2).
+"""SNAP's small extra initrd (Design 0001, sections 5.2 and 5.3).
 
 GRUB loads it after Proxmox's own initrd; Linux unpacks both, and files in the
 second replace those in the first. It holds Proxmox's start-up script (/init),
-taken from the ISO at build time with one line added, and choose-disk.sh, which
-that line runs just before the installer starts.
+taken from the ISO at build time with one line added, which runs hook.sh just
+before the installer starts: the setup wizard for the guided setup, the disk
+prompt (choose-disk.sh) for the no-questions install.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import shutil
 import subprocess
 from importlib import resources
 
-HOOK = "    . /snap/choose-disk.sh  # SNAP: choose the install disk (snaplab/delivery/usb/initrd.py)\n"
+HOOK = "    . /snap/hook.sh  # SNAP: setup wizard or disk prompt (snaplab/delivery/usb/initrd.py)\n"
 # The hook goes just before the installer is started, after the stick is
 # mounted, every storage driver is loaded and the installer's files are in place.
 ANCHOR = '    if [ -x "/mnt/.installer-mp/sbin/unconfigured.sh" ]; then\n'
@@ -97,14 +98,19 @@ def archive(files: dict[str, tuple[int, bytes]]) -> bytes:
     return out + b"\0" * (-len(out) % 512)
 
 
-def overlay(pve_initrd: bytes) -> bytes:
-    """The extra initrd: Proxmox's /init with the hook, and the disk prompt."""
+def overlay(pve_initrd: bytes, wizard: dict[str, bytes] | None = None) -> bytes:
+    """The extra initrd: Proxmox's /init with the hook, the hook, the disk prompt and the wizard."""
     init = patch_init(read_init(pve_initrd))
-    prompt = resources.files("snaplab.delivery.usb").joinpath("choose-disk.sh").read_bytes()
-    return archive(
-        {
-            "init": (0o100755, init.encode()),
-            "snap": (0o040755, b""),
-            "snap/choose-disk.sh": (0o100644, prompt),
-        }
-    )
+    usb = resources.files("snaplab.delivery.usb")
+    files = {
+        "init": (0o100755, init.encode()),
+        "snap": (0o040755, b""),
+        "snap/hook.sh": (0o100644, usb.joinpath("hook.sh").read_bytes()),
+        "snap/choose-disk.sh": (0o100644, usb.joinpath("choose-disk.sh").read_bytes()),
+    }
+    if wizard:
+        files["snap/wizard"] = (0o040755, b"")
+        for name, content in wizard.items():
+            mode = 0o100755 if name.endswith(".pl") else 0o100644
+            files[f"snap/wizard/{name}"] = (mode, content)
+    return archive(files)

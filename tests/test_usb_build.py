@@ -13,9 +13,12 @@ import json
 import os
 import select
 import shutil
+import socket
+import struct
 import subprocess
 import sys
 import time
+import zlib
 from pathlib import Path
 
 import pytest
@@ -267,17 +270,56 @@ def test_boot_menu_replaces_proxmox_menu(built):
 # --- boot ------------------------------------------------------------------
 
 
-def boot(img: Path, tmp_path: Path, uefi: bool, until: str, target: Path | None = None, seconds: int = 120) -> str:
+def ppm_to_png(ppm: bytes) -> bytes:
+    """QEMU's screen dumps are PPM; turn one into a PNG with the standard library."""
+    magic, width, height, depth, pixels = ppm.split(maxsplit=4)
+    assert magic == b"P6" and depth == b"255"
+    w, h = int(width), int(height)
+    rows = b"".join(b"\0" + pixels[y * w * 3 : (y + 1) * w * 3] for y in range(h))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    header = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+
+
+def screenshot(monitor: Path, png: Path) -> None:
+    """Save what is on the virtual screen (the themed menu, which the serial console cannot show)."""
+    ppm = png.with_suffix(".ppm")
+    with socket.socket(socket.AF_UNIX) as s:
+        s.connect(str(monitor))
+        s.sendall(f"screendump {ppm}\n".encode())
+        for _ in range(50):
+            time.sleep(0.1)
+            if ppm.exists() and ppm.stat().st_size > 0:
+                break
+        time.sleep(0.3)
+    png.parent.mkdir(parents=True, exist_ok=True)
+    png.write_bytes(ppm_to_png(ppm.read_bytes()))
+    ppm.unlink()
+
+
+def boot(
+    img: Path,
+    tmp_path: Path,
+    uefi: bool,
+    until: str,
+    target: Path | None = None,
+    seconds: int = 120,
+    shot: tuple[str, Path] | None = None,
+) -> str:
     """Boot the stick in QEMU and return what appeared on the serial console up to `until`.
 
     The stand-in kernels cannot start, so GRUB would end at an error and wait; stop as soon as
-    `until` appears, or after `seconds`.
+    `until` appears, or after `seconds`. With `shot` (text, file), the screen is saved as a PNG
+    once that text has appeared on the serial console.
     """
     stick = tmp_path / "stick.img"
     shutil.copyfile(img, stick)
     # A display adapter like every real PC has (the menu is themed on it), plus a serial console to read.
     cmd = ["qemu-system-x86_64", "-m", "512", "-display", "none", "-vga", "std", "-no-reboot", "-nodefaults"]
-    cmd += ["-serial", "stdio"]
+    cmd += ["-serial", "stdio", "-monitor", f"unix:{tmp_path / 'monitor'},server,nowait"]
     if uefi:
         vars_ = tmp_path / "vars.fd"
         shutil.copyfile(OVMF_VARS, vars_)
@@ -296,6 +338,10 @@ def boot(img: Path, tmp_path: Path, uefi: bool, until: str, target: Path | None 
     deadline = time.monotonic() + seconds
     try:
         while time.monotonic() < deadline and until.encode() not in out:
+            if shot and shot[0].encode() in out:
+                time.sleep(1)  # let GRUB finish drawing
+                screenshot(tmp_path / "monitor", shot[1])
+                shot = None
             ready, _, _ = select.select([proc.stdout], [], [], 1)
             if ready:
                 chunk = os.read(proc.stdout.fileno(), 65536)
@@ -313,12 +359,17 @@ def boot(img: Path, tmp_path: Path, uefi: bool, until: str, target: Path | None 
 @pytest.mark.parametrize("uefi", [False, True], ids=["bios", "uefi"])
 def test_fresh_machine_shows_snap_menu_and_installs(built, tmp_path, uefi):
     img, _ = built
-    out = boot(img, tmp_path, uefi, until="SNAP: starting the unattended Proxmox VE install.")
-    assert "Install Proxmox VE and build my lab" in out
+    # The themed menu with the logo; CI keeps the pictures ($SNAPLAB_SCREENSHOTS).
+    folder = Path(os.environ.get("SNAPLAB_SCREENSHOTS") or tmp_path)
+    picture = folder / f"boot-menu-{'uefi' if uefi else 'bios'}.png"
+    out = boot(img, tmp_path, uefi, until="SNAP: starting the guided setup.", shot=("Advanced options", picture))
+    assert picture.stat().st_size > 5000  # a drawn screen, not a blank one
+    assert "Install SNAP: guided setup (recommended)" in out
+    assert "Install with SNAP's settings, no questions asked" in out
     assert "Progress:  [ ] 1 Install   [ ] 2 Host   [ ] 3 Network+VMs   [ ] 4 Finish" in out
     assert "Advanced options" in out
     assert "Install Proxmox VE (Graphical)" not in out
-    assert "SNAP: starting the unattended Proxmox VE install." in out
+    assert "SNAP: starting the guided setup." in out  # the default entry
 
 
 needs_lvm = pytest.mark.skipif(

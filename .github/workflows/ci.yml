@@ -21,9 +21,30 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
-      - run: shellcheck snaplab/stages/snap/*.sh snaplab/delivery/usb/*.sh tests/usb/*.sh
+      - run: shellcheck snaplab/stages/snap/*.sh snaplab/delivery/usb/*.sh snaplab/delivery/usb/wizard/*.sh tests/usb/*.sh
       - run: pytest -q
       - run: snaplab validate examples/snap.example.yaml
+
+  # The setup wizard's screens in Chromium (the Proxmox installer shows them with
+  # WebKit), with a picture of each screen kept.
+  wizard-screens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e '.[dev]' playwright
+      - run: python -m playwright install --with-deps chromium
+      - run: pytest -v tests/test_wizard_ui.py
+        env:
+          SNAPLAB_SCREENSHOTS: wizard-screens
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wizard-screens
+          path: wizard-screens/*.png
+          if-no-files-found: ignore
 
   # Check the generated answer files with Proxmox's own tool (Design 0001, D3).
   proxmox-answer:
@@ -68,6 +89,13 @@ jobs:
       - run: pytest -v -rs tests/test_usb_build.py
         env:
           SNAPLAB_TEST_LVM: "1"
+          SNAPLAB_SCREENSHOTS: boot-menu
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: boot-menu
+          path: boot-menu/*.png
+          if-no-files-found: ignore
 
   # The OpenTofu configuration and Ansible playbooks POP hands to the host,
   # checked against the pinned provider and collection (Design 0001, section 12).

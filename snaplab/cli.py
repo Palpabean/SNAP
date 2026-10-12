@@ -26,6 +26,12 @@ def main(argv: list[str] | None = None) -> int:
     usb.add_argument(
         "--serial-console", action="store_true", help="also show installer and system output on the first serial port"
     )
+    usb.add_argument(
+        "--unattended",
+        choices=["wizard", "text"],
+        help="for automated tests: run the guided setup by itself with its defaults (wizard), "
+        "or make the no-questions install the default (text)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -43,7 +49,13 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             source = Path(args.file) if args.file else None
-            out = build.build(source, Path(args.output), cache=args.cache, serial_console=args.serial_console)
+            out = build.build(
+                source,
+                Path(args.output),
+                cache=args.cache,
+                serial_console=args.serial_console,
+                unattended=args.unattended,
+            )
         except (build.BuildError, fetch.FetchError, image.ImageError) as e:
             print(f"build failed: {e}", file=sys.stderr)
             return 1
