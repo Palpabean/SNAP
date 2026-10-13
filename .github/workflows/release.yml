@@ -5,7 +5,9 @@ name: Download image
 # computer picks its own at first start), compressed with xz, which
 # balenaEtcher and Rufus write directly.
 #
-# A tag like v1.0.0 publishes it as a GitHub release. Any other run (a push
+# A tag like v1.0.0 publishes it as a GitHub release; the tag can be pushed, or made
+# on GitHub's website with "Draft a new release" (the files are added to that release
+# when the build finishes, about two hours later). Any other run (a push
 # that changes this workflow, or by hand) only builds it, checks it fits, and
 # keeps it as a workflow artifact for a few days. (GitHub applies `paths` to
 # branch pushes only, never to tags.)
@@ -89,5 +91,15 @@ jobs:
           To check the download: `snap.img.xz.sha256` (the file you downloaded) and
           `snap.img.sha256` (the image inside it).
           EOF
-          gh release create "${{ github.ref_name }}" snap.img.xz snap.img.xz.sha256 snap.img.sha256 \
-            --title "SNAP ${{ github.ref_name }}" --notes-file notes.md
+          tag="${{ github.ref_name }}"
+          files="snap.img.xz snap.img.xz.sha256 snap.img.sha256"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            # Made on the website (which creates the tag and the release together): add the
+            # files to it, and fill in the notes only if it has none.
+            gh release upload "$tag" $files --clobber
+            if [ -z "$(gh release view "$tag" --json body --jq .body)" ]; then
+              gh release edit "$tag" --notes-file notes.md
+            fi
+          else
+            gh release create "$tag" $files --title "SNAP $tag" --notes-file notes.md
+          fi

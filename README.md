@@ -78,8 +78,9 @@ docker run --rm -v "$PWD:/work" snaplab-builder build -o snap.img
   `build my-changes.yaml -o snap.img`. All settings: [examples/snap.example.yaml](examples/snap.example.yaml),
   schema: [snaplab/core/schema/snap.schema.json](snaplab/core/schema/snap.schema.json).
 - **The download image:** `--release` builds the stick to publish: no password in it; each lab
-  computer picks its own at first start and shows it on its screen. Pushing a tag like `v1.0.0`
-  builds it, compresses it (`snap.img.xz`) and publishes it as a GitHub release
+  computer picks its own at first start and shows it on its screen. A tag like `v1.0.0` (pushed,
+  or made with **Draft a new release** on GitHub's website) builds it, compresses it
+  (`snap.img.xz`) and adds it to that GitHub release about two hours later
   (`.github/workflows/release.yml`).
 - **No questions at all:** `--unattended text` makes "no questions asked" the menu's default;
   `--unattended wizard` runs the setup screens with their defaults (both are for automated tests).
