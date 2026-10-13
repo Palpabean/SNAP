@@ -84,7 +84,7 @@ jobs:
           **The ready-made SNAP USB stick.** Download `snap.img.xz`, write it to a USB stick of
           8 GB or more with [balenaEtcher](https://etcher.balena.io/) (no need to unzip it first),
           and start the spare computer from the stick. Step by step:
-          [docs/INSTALL.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/INSTALL.md).
+          [the install guide](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md#install).
 
           This stick holds no password: each lab computer picks its own and shows it on its screen.
 

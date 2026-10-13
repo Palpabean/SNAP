@@ -32,6 +32,9 @@ my $INSTALL_MODE = @ARGV && $ARGV[0] eq '--install';
 # Gtk3::WebKit2 makes its classes (WebView and the rest) in import().
 BEGIN {
     unless (@ARGV && $ARGV[0] eq '--install') {
+        # The page is dark; GTK's dark look too, so the lists that drop down from the page's
+        # drop-downs (GTK draws those, not the page) match it.
+        $ENV{GTK_THEME} //= 'Adwaita:dark';
         require Glib;
         require Gtk3;
         Gtk3->import('-init');
@@ -124,7 +127,6 @@ if ($INSTALL_MODE) {
 }
 
 # --- the window -----------------------------------------------------------------
-
 
 my $window = Gtk3::Window->new('toplevel');
 $window->set_title('SNAP setup');

@@ -335,13 +335,12 @@ const SNAP = (() => {
         ${notes.map((c) => `<div class="x">${esc(c.text)}</div>`).join("")}
         <div class="r">${field("h-hostname", "Computer name", h.hostname)}${field("h-domain", "Domain", h.domain)}${select("h-timezone", "Time zone", h.timezone, zones)}</div>
         <div class="r">${select("h-keyboard", "Keyboard layout", h.keyboard, KEYBOARDS)}
-          ${select("h-mode", "How this computer gets its address", h.mode, [["dhcp", "Automatically from your router (recommended)"], ["static", "Fixed address"]], { change: "SNAP.redraw()" })}
-          <div class="f"></div></div>
+          ${select("h-mode", "How this computer gets its address", h.mode, [["dhcp", "Automatically from your router (recommended)"], ["static", "Fixed address"]], { change: "SNAP.redraw()" })}</div>
         ${h.mode === "static" ? `<div class="r">${field("h-address", "Address", h.address, { placeholder: "192.168.1.50/24" })}${field("h-gateway", "Gateway", h.gateway, { placeholder: "192.168.1.1" })}${field("h-dns", "DNS server", h.dns, { placeholder: "192.168.1.1" })}
           ${select("h-iface", "Network port", h.iface, (data.interfaces || []).map((n) => [n.name, n.name + (n.carrier ? " (cable connected)" : "")]))}</div>` : ""}
-        <div class="r" style="align-items:flex-end">${field("h-password", "Password for Proxmox, the router and the lab machines", s.password,
+        <div class="r">${field("h-password", "Password for Proxmox, the router and the lab machines", s.password,
           { hint: "Made for you. Write it down, or type your own (8 characters or more)." })}
-          <div class="f" style="flex:0 0 auto"><button type="button" onclick="SNAP.newPassword()">Make a new one</button></div></div>`;
+          <div class="f" style="flex:0 0 auto;padding-top:1.52rem"><button type="button" onclick="SNAP.newPassword()">Make a new one</button></div></div>`;
     },
 
     network() {
@@ -377,7 +376,7 @@ const SNAP = (() => {
 
     firewall() {
       nav('<button type="button" onclick="SNAP.back()">Back</button>', '<button type="button" class="p" onclick="SNAP.next()">Next: Review</button>');
-      const rows = s.networks.map((n, i) => `<div class="r" style="align-items:center"><b style="width:90px">${esc(n.name)}</b><div class="cards">` +
+      const rows = s.networks.map((n, i) => `<div class="r" style="align-items:center"><b class="name">${esc(n.name)}</b><div class="cards">` +
         POLICIES.map(([p, t, d]) => `<button type="button" class="card${n.policy === p ? " on" : ""}" aria-pressed="${n.policy === p}" onclick="SNAP.policy(${i},'${p}')"><b>${t}</b>${d}</button>`).join("") +
         "</div></div>").join("");
       const rules = [];
@@ -404,8 +403,8 @@ const SNAP = (() => {
           <div class="k"><i>Networks</i>${p.networks.map((n) => esc(n.name + " " + n.cidr)).join(", ")}</div>
           <div class="k"><i>Machines</i>${m.mode === "create" ? `${m.count} x Alpine Linux 3.22, ${m.cpu} CPU, ${m.memory_mb / 1024} GB, ${m.disk_gb} GB, on ${esc(m.network)}` : "template only"}</div>
           <div class="k"><i>Firewall</i>${p.networks.map((n) => esc(n.name + ": " + POLICIES.find((x) => x[0] === n.policy)[1].toLowerCase())).join(". ")}</div>
-          <div class="k"><i>Password</i><span class="pw" style="font-size:16px">${esc(s.password)}</span></div>
-        </div><div style="flex:1;display:flex;flex-direction:column;gap:10px">
+          <div class="k"><i>Password</i><span class="pw" style="font-size:1.067rem">${esc(s.password)}</span></div>
+        </div><div style="flex:1;display:flex;flex-direction:column;gap:0.667rem">
           <span class="lbl">Install on this disk</span>
           ${disks || '<div class="x">No internal disk was found.</div>'}
           ${errors.disk ? `<span class="err">${esc(errors.disk)}</span>` : ""}
@@ -422,8 +421,8 @@ const SNAP = (() => {
         <p class="d">This takes about 10 minutes. The computer then restarts by itself and SNAP builds your lab. Leave the USB stick in.</p>
         <div style="display:flex;justify-content:space-between"><b id="p-text">Getting ready</b><span id="p-pct">0%</span></div>
         <div class="bar"><i id="p-bar"></i></div>
-        <div class="r"><div class="card"><span class="d">Your password</span><div class="pw" style="margin-top:6px">${esc(s.password)}</div><span class="hint">Write it down now. It is shown again when the lab is ready.</span></div>
-          <div class="card"><span class="d">Next</span><div style="margin-top:6px">Restart, then CRACKLE prepares the computer and POP builds the router, networks and machines (about 40 minutes).</div></div></div>
+        <div class="r"><div class="card"><span class="d">Your password</span><div class="pw" style="margin-top:0.4rem">${esc(s.password)}</div><span class="hint">Write it down now. It is shown again when the lab is ready.</span></div>
+          <div class="card"><span class="d">Next</span><div style="margin-top:0.4rem">Restart, then CRACKLE prepares the computer and POP builds the router, networks and machines (about 40 minutes).</div></div></div>
         <div id="log" class="log hidden">${esc(installLog.join("\n"))}</div>`;
     },
 
@@ -439,7 +438,7 @@ const SNAP = (() => {
       nav("", '<span class="d">Restarting&hellip;</span>');
       return `<h1>Proxmox is installed</h1>
         <p class="d">The computer restarts now and SNAP continues building your lab. Leave the USB stick in; the screen shows the progress.</p>
-        <div class="card" style="flex:none"><span class="d">Your password</span><div class="pw" style="margin-top:6px">${esc(s.password)}</div></div>`;
+        <div class="card" style="flex:none"><span class="d">Your password</span><div class="pw" style="margin-top:0.4rem">${esc(s.password)}</div></div>`;
     },
   };
 
@@ -452,7 +451,7 @@ const SNAP = (() => {
       <div class="r">${f("n-name", "Name", n.name, "name")}${f("n-cidr", "Address range", n.cidr, "cidr", "Like 10.10.30.0/24")}${f("n-router", "Router address", n.router, "router")}</div>
       <div class="r">${f("n-vlan", "VLAN (optional)", n.vlan ?? "", "vlan", "1 to 4093")}${f("n-start", "First automatic address", (n.dhcp || {}).start || "", "start")}${f("n-end", "Last automatic address", (n.dhcp || {}).end || "", "end")}</div>
       <div><input id="n-dhcp" type="checkbox"${n.dhcp && n.dhcp.enabled ? " checked" : ""}> <label for="n-dhcp">Hand out addresses automatically (DHCP)</label></div>
-      <div style="display:flex;gap:8px"><button type="button" class="p sm" onclick="SNAP.saveNetwork()">Save network</button><button type="button" class="sm" onclick="SNAP.cancelNetwork()">Cancel</button></div></div>`;
+      <div style="display:flex;gap:0.533rem"><button type="button" class="p sm" onclick="SNAP.saveNetwork()">Save network</button><button type="button" class="sm" onclick="SNAP.cancelNetwork()">Cancel</button></div></div>`;
   }
 
   function rulePanel() {
@@ -467,7 +466,7 @@ const SNAP = (() => {
         ${field("r-ports", "Ports (TCP or UDP only)", r.ports || "", { placeholder: "22, 443" })}
         ${field("r-description", "Description (optional)", r.description || "")}</div>
       ${r.error ? `<span class="err">${esc(r.error)}</span>` : ""}
-      <div style="display:flex;gap:8px"><button type="button" class="p sm" onclick="SNAP.saveRule()">Add rule</button><button type="button" class="sm" onclick="SNAP.cancelRule()">Cancel</button></div></div>`;
+      <div style="display:flex;gap:0.533rem"><button type="button" class="p sm" onclick="SNAP.saveRule()">Add rule</button><button type="button" class="sm" onclick="SNAP.cancelRule()">Cancel</button></div></div>`;
   }
 
   function render() {

@@ -48,8 +48,8 @@ def browser():
         b.close()
 
 
-def open_wizard(browser, site, checks=None, auto=False):
-    page = browser.new_page(viewport={"width": 1024, "height": 768})
+def open_wizard(browser, site, checks=None, auto=False, size=(1024, 768)):
+    page = browser.new_page(viewport={"width": size[0], "height": size[1]})
     data = {
         "config": json.loads((site / "config.json").read_text()),
         "disks": DISKS,
@@ -234,3 +234,45 @@ def test_unattended_mode_installs_by_itself(browser, site):
     page = open_wizard(browser, site, auto=True)
     page.wait_for_function("SNAP.state().screen === 'installing'", timeout=20000)
     assert page.evaluate("SNAP_SENT[SNAP_SENT.length - 1][0]") == "install"
+
+
+DARK = "rgb(23, 34, 46)"  # the boxes' background, #17222E
+
+
+@pytest.mark.parametrize("size", [(1024, 768), (1920, 1080), (2560, 1440)])
+def test_wide_screens_keep_one_centred_column(browser, site, size):
+    page = open_wizard(browser, site, size=size)
+    width = size[0]
+    for name in ("Next: Network", "Next: Machines", "Next: Firewall", "Next: Review"):
+        shot(page, f"wide-{width}-{screen(page)}")
+        click(page, name)
+    shot(page, f"wide-{width}-review")
+    box = lambda sel: page.locator(sel).first.bounding_box()  # noqa: E731
+    title, start = box("h1"), box("nav button.p")
+    left, right = title["x"], width - (start["x"] + start["width"])
+    assert abs(left - right) < 4  # centred: the same margin on both sides
+    font = page.evaluate("parseFloat(getComputedStyle(document.documentElement).fontSize)")
+    assert width - left - right <= 80 * font + 1  # at most 80 rem wide, not edge to edge
+    assert 15 <= font <= 22 and (font > 15) == (width > 1024)  # bigger text on bigger screens
+    steps = page.eval_on_selector_all(".step, .brand span", "els => els.map(e => e.getBoundingClientRect().height)")
+    assert max(steps) < 2.5 * font  # the header's words stay on one line each, even at 1024 wide
+    assert not page.errors
+
+
+def test_controls_are_dark_not_the_window_theme(browser, site):
+    page = open_wizard(browser, site)
+    looks = lambda sel: page.eval_on_selector_all(  # noqa: E731
+        sel, "els => els.map(e => [getComputedStyle(e).backgroundColor, getComputedStyle(e).color])"
+    )
+    for background, colour in looks("select") + looks("select option") + looks("input[type=text]"):
+        assert background == DARK and colour == "rgb(230, 237, 243)"
+    assert page.evaluate("getComputedStyle(document.documentElement).colorScheme") == "dark"
+    click(page, "Next: Network")
+    click(page, "Next: Machines")
+    click(page, "Next: Firewall")
+    click(page, "Next: Review")
+    for appearance, background in page.eval_on_selector_all(
+        "input[type=radio], input[type=checkbox]",
+        "els => els.map(e => [getComputedStyle(e).appearance, getComputedStyle(e).backgroundColor])",
+    ):
+        assert appearance == "none" and background != "rgb(255, 255, 255)"
