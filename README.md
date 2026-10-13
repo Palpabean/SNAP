@@ -1,96 +1,121 @@
 # SNAP
 
-**SNAP (Swift Network Automation Program) turns a spare computer into a ready-made practice lab.**
+**SNAP (Swift Network Automation Program) turns a spare computer into a ready-to-use virtual lab from a single USB stick.**
 
-You make a USB stick, start the spare computer from it, and walk away. About an hour
-later the computer is a working lab:
+Boot the spare computer from the stick, confirm a few settings, and about an hour later it is running:
 
-- **Proxmox**: the free program that runs virtual computers, with a web page to manage them.
-- **A router and firewall** (OPNsense) that keeps the lab separate from your home network.
-- **Two lab networks**: one that can reach the internet, and one that is completely closed off.
-- **Two small Linux machines** (Alpine Linux), ready to log in to.
+- **Proxmox VE**, the hypervisor, managed from your browser.
+- **An OPNsense router and firewall** that keeps the lab separate from your home network.
+- **Two lab networks**: `lab` (internet access) and `services` (fully isolated).
+- **Two Alpine Linux virtual machines** on the `lab` network, ready to log in to.
 
-Everything comes from the stick. Nothing needs to be typed in, and the lab builds without an
-internet connection.
+Everything the lab needs is on the stick, so the build works offline.
 
-> **The spare computer is wiped.** Use one with nothing on it you want to keep.
+> **The spare computer's disk is erased.** Use a machine with nothing on it you want to keep.
 
-## How it works
+## Requirements
 
-1. **Make the stick** on your own computer (Windows, Mac or Linux): download the ready-made
-   stick from the [latest release](https://github.com/Palpabean/SNAP/releases/latest) and write
-   it to a USB stick with a free program. (You can also build it yourself; see the guide.)
-2. **Start the spare computer from the stick.** The SNAP menu appears.
-3. **Click through the setup screens.** Everything is already filled in, so you can just press
-   **Next** on each one. Write down the password shown on the first screen (the lab computer's
-   screen shows it again at the end).
-4. **Wait.** The computer installs, restarts by itself and builds the lab. Its screen shows each
-   step as it goes.
-5. **Open your lab.** When the screen says **Your lab is ready**, type the web address it shows
-   into the browser on your own computer, and log in.
+| | |
+| :--- | :--- |
+| **Spare computer** | 64-bit, virtualization (Intel VT-x / AMD-V) enabled, 16 GB RAM (8 GB minimum), 128 GB+ disk, wired network connection |
+| **USB stick** | 8 GB or larger (it is erased) |
+| **Your own computer** | Windows, macOS or Linux, with about 4 GB free and [balenaEtcher](https://etcher.balena.io/) |
 
-**Full step-by-step guide: [docs/INSTALL.md](docs/INSTALL.md)**
-**Pictures of every screen, in order: [docs/screens](docs/screens/README.md)**
+## Install
 
-## What you need
+### 1. Make the stick
 
-- Your own computer with about 4 GB of free space, and [balenaEtcher](https://etcher.balena.io/) to write the stick.
-- A USB stick of 8 GB or more (it is erased).
-- The spare computer: 16 GB of memory (8 GB at the very least), a disk of 128 GB or more,
-  virtualization turned on in its setup screen (the setup screens check this for you),
-  and a network cable to your router.
+1. Download **`snap.img.xz`** (about 2 GB) from the [latest release](https://github.com/Palpabean/SNAP/releases/latest).
+2. Open balenaEtcher, choose **Flash from file**, select `snap.img.xz` (no need to unzip it), pick the USB stick, and click **Flash**.
 
-## The four stages
+The stick contains no password. Each lab computer generates its own and shows it on screen.
 
-SNAP builds the lab in four stages, named after the sound of a spark. The screens show each one.
+### 2. Install the lab
 
-| Stage | What it does | Ready? |
-| :--- | :--- | :--- |
-| **SNAP** | The USB stick: checks the computer, asks its questions, installs Proxmox | Yes |
-| **CRACKLE** | Prepares the new Proxmox computer and the tools that build the lab | Yes |
-| **POP** | Builds the router, the networks and the Linux machines, then checks they work | Yes |
-| **BANG** | Checks the whole lab once more, writes a summary, removes spare copies of keys and passwords | Yes |
+1. Plug the stick and a network cable into the spare computer and power it on.
+2. Open the boot menu (usually **F12**, **F11**, **F8** or **Esc**) and choose the USB stick.
+3. The SNAP menu appears and starts the **guided setup** after 10 seconds.
+4. Step through the setup screens. The defaults are ready to use, so **Next** on each screen is enough:
+   - **Host**: name, time zone, keyboard and the **password**. Write the password down.
+   - **Network**, **Machines**, **Firewall**: the lab's layout, editable if you want.
+   - **Review**: choose the disk, confirm it may be erased, and click **Start installation**.
 
-When BANG finishes, the lab computer's screen says **Your lab is ready**, and a summary of the
-lab is saved on it as `/root/snap-lab.txt`. Every stage is tested automatically by installing
-the whole thing on a virtual computer, from the stick to the ready lab.
+   If the first screen reports a problem (for example, virtualization is disabled), fix it in the
+   computer's firmware settings and click **Check again**.
+5. Wait about an hour. Proxmox installs, the computer restarts, and the lab builds itself. The
+   screen shows progress throughout. Leave the stick in until it says **Your lab is ready**.
 
-## If something goes wrong
+Prefer no questions at all? Choose **Install with SNAP's settings, no questions asked** in the
+menu. SNAP shows the disk it will use and erases it after 15 seconds (with more than one disk it
+asks which one, and you type `ERASE` to confirm).
 
-The lab computer's screen says what happened and what to try. Usually that means pressing
-**R** to try again: SNAP continues from where it stopped and never starts over on its own.
-More help is at the end of [docs/INSTALL.md](docs/INSTALL.md).
+[Pictures of every screen, in order](docs/screens/README.md)
+
+### 3. Open the lab
+
+1. The lab computer's screen shows the web address (for example `https://192.168.1.50:8006`),
+   the user name `root`, and the password.
+2. Open that address in a browser on your own computer. The certificate warning is expected for a
+   new lab: choose **Advanced**, then **Continue**.
+3. Log in as `root`.
+
+You will find the router `snap-router` and the machines `alpine-01` and `alpine-02`. To use a
+machine, select it and open **Console**; log in as `labuser` with the same password. A summary of
+the lab is saved on the lab computer as `/root/snap-lab.txt`.
+
+## Troubleshooting
+
+| Problem | What to do |
+| :--- | :--- |
+| The computer does not boot from the stick | In the firmware settings (often **F2** or **Del** at power-on), enable USB boot. |
+| "Virtualization is turned off" | Enable Intel VT-x or AMD-V (sometimes called SVM) in the firmware settings. |
+| "No internal disk found" | The disk is not detected. Check it in the firmware settings. |
+| The install fails during setup | The screen explains why. Click **Try again**, or **Turn off computer** to fix the cause first. |
+| The lab screen says a step **needs attention** | Press **R** to retry; SNAP resumes where it stopped. Press **L** to view the log. Restarting the computer also retries. |
+| Lost the password | It is on the lab computer's screen: the "ready" screen shows it, or press **P** while it is building. |
 
 ## For developers
 
 <details>
-<summary>Building, options and tests</summary>
+<summary>Building the stick, options and tests</summary>
 
-Build the stick (the first build downloads the Proxmox installer, about 1.7 GB, and checks it
-against `checksums.lock`):
+### Build the stick yourself
+
+Needs Docker and about 10 GB free. The first build downloads the Proxmox installer (about 1.7 GB)
+and verifies it against `checksums.lock`.
 
 ```sh
-docker build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
-docker run --rm -v "$PWD:/work" snaplab-builder build -o snap.img
+docker build --platform linux/amd64 -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
+docker run --rm --platform linux/amd64 -v "$PWD:/work" snaplab-builder build -o snap.img
 ```
 
-- **Change the built-in lab:** write a `snap.yaml` with only the settings to change and add it:
+The build prints a password (also saved as `snap.img.password.txt`), used by the "no questions
+asked" install. Write `snap.img` to a stick with balenaEtcher.
+
+### Options
+
+- **Change the built-in lab:** pass a `snap.yaml` with only the settings to change:
   `build my-changes.yaml -o snap.img`. All settings: [examples/snap.example.yaml](examples/snap.example.yaml),
   schema: [snaplab/core/schema/snap.schema.json](snaplab/core/schema/snap.schema.json).
-- **The download image:** `--release` builds the stick to publish: no password in it; each lab
-  computer picks its own at first start and shows it on its screen. A tag like `v1.0.0` (pushed,
-  or made with **Draft a new release** on GitHub's website) builds it, compresses it
-  (`snap.img.xz`) and adds it to that GitHub release about two hours later
+- **Release image:** `--release` builds the published image, with no password inside; each lab
+  computer generates its own at first boot. A `v*` tag (pushed, or created with **Draft a new
+  release** on GitHub) builds it, compresses it to `snap.img.xz` and attaches it to the release
   (`.github/workflows/release.yml`).
-- **No questions at all:** `--unattended text` makes "no questions asked" the menu's default;
-  `--unattended wizard` runs the setup screens with their defaults (both are for automated tests).
-- **Serial console:** `--serial-console` for computers without a screen.
+- **Unattended:** `--unattended text` makes "no questions asked" the menu default;
+  `--unattended wizard` runs the setup screens with their defaults (used by the automated tests).
+- **Serial console:** `--serial-console` for headless machines.
 - **On the lab computer:** `snap status` shows each step, `snap logs` the log, `snap resume`
-  continues after a failure, and `snap screen` is the setup screen itself.
+  continues after a failure, and `snap screen` is the progress screen.
 
-How it is built: [docs/design/0001-architecture.md](docs/design/0001-architecture.md).
+### How it works
 
-Tests need Python 3.11 or newer:
+The stick runs the Proxmox installer with an answer file, then hands over to SNAP on the installed
+system, which builds the lab in stages (host preparation, router and networks, machines, final
+checks). Each step is idempotent and resumable. Details: [docs/design/0001-architecture.md](docs/design/0001-architecture.md).
+
+### Tests
+
+Python 3.11 or newer:
 
 ```sh
 python3 -m venv .venv && . .venv/bin/activate
@@ -99,8 +124,9 @@ ruff check . && ruff format --check .
 pytest
 ```
 
-The setup screens' tests also need Playwright (`pip install playwright`) for the page, and
-`xvfb` with `libgtk3-webkit2-perl` for the real window; they are skipped without them.
+The setup screen tests also need Playwright (`pip install playwright`) for the page, and `xvfb`
+with `libgtk3-webkit2-perl` for the real window; they are skipped without them. CI also installs
+the whole thing on a virtual machine, from the stick to the ready lab, in BIOS and UEFI mode.
 
 Never commit a real `snap.yaml`, password files, ISOs or disk images. `.gitignore` covers them.
 
