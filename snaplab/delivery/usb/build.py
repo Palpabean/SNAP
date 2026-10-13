@@ -12,12 +12,14 @@ the container from snaplab/delivery/usb/Containerfile.
 
 from __future__ import annotations
 
+import bz2
 import hashlib
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from importlib import resources
 from pathlib import Path
 
@@ -29,7 +31,19 @@ from snaplab.delivery.usb import debs, fetch, image, initrd, menu, wizard_files
 from snaplab.stages.snap import answer
 
 ASSISTANT = "proxmox-auto-install-assistant"
-TOOLS = [ASSISTANT, "xorriso", "mkfs.ext4", "sfdisk", "apt-get", "dpkg-deb", "openssl"]
+TOOLS = [
+    ASSISTANT,
+    "xorriso",
+    "mkfs.ext4",
+    "sfdisk",
+    "apt-get",
+    "dpkg-deb",
+    "openssl",
+    "xz",
+    "qemu-img",
+    "sqfs2tar",
+    "tar2sqfs",
+]
 REPO_LOCK = Path(__file__).resolve().parents[3] / "checksums.lock"
 # What of the package goes on the stick for the host: the engine and the files
 # the stages hand to OpenTofu and Ansible.
@@ -147,20 +161,114 @@ def make_payload(
     (dest / "payload.sha256").write_text(manifest)
 
 
+# The VM disk images on the stick, as plain disk images compressed with xz: the
+# published files are a qcow2 with light zlib compression inside (the lab machine image) and
+# bzip2 (OPNsense), which take 172 and 514 MiB; repacked, 73 and 343 MiB.
+# This is what lets the download image fit in one release file.
+LAB_IMAGE = "images/alpine-3.22-cloudinit.raw.xz"  # = crackle.stage.LAB_IMAGE
+OPNSENSE_IMAGE = "images/opnsense-nano-amd64.img.xz"  # = pop.stage.OPNSENSE_ARCHIVE
+QCOW2_MAGIC = b"QFI\xfb"
+
+
+def repack(source: Path, log=print) -> Path:
+    """`source` (qcow2, .bz2 or raw) as a raw disk image compressed with xz -9, made once
+    next to it in the download cache."""
+    out = source.with_name(source.name + ".raw.xz")
+    if out.exists():
+        return out
+    log(f"repacking {source.name} (a few minutes, once)")
+    raw = source.with_name(source.name + ".raw")
+    try:
+        with source.open("rb") as f:
+            magic = f.read(4)
+        if magic == QCOW2_MAGIC:
+            image.run(["qemu-img", "convert", "-O", "raw", str(source), str(raw)])
+        elif source.suffix == ".bz2":
+            with bz2.open(source) as src, raw.open("wb") as dst:
+                shutil.copyfileobj(src, dst, length=4 * 1024 * 1024)
+        else:
+            shutil.copyfile(source, raw)
+        tmp = out.with_name(out.name + ".partial")
+        with tmp.open("wb") as dst:
+            done = subprocess.run(["xz", "-T0", "-9", "--stdout", str(raw)], stdout=dst, stderr=subprocess.PIPE)
+        if done.returncode != 0:
+            tmp.unlink(missing_ok=True)
+            raise BuildError(f"xz could not compress {source.name}: {done.stderr.decode(errors='replace').strip()}")
+        tmp.replace(out)
+    finally:
+        raw.unlink(missing_ok=True)
+    return out
+
+
+def repack_zip(source: Path) -> Path:
+    """The same zip with LZMA instead of deflate (about a third smaller for these programs);
+    Python's zipfile, which CRACKLE unpacks with, reads it. Made once, next to the download."""
+    out = source.with_name(source.stem + ".lzma.zip")
+    if out.exists():
+        return out
+    partial = out.with_name(out.name + ".partial")
+    with zipfile.ZipFile(source) as src, zipfile.ZipFile(partial, "w") as dst:
+        for info in src.infolist():
+            content = src.read(info)
+            info.compress_type = zipfile.ZIP_LZMA  # modes and times stay in `info`
+            dst.writestr(info, content)
+    partial.replace(out)
+    return out
+
+
+# The Proxmox installer's own filesystem images, compressed with zstd. Rebuilt
+# with xz they are 614 -> 564 and 108 -> 98 MiB: with the VM images above, what
+# lets the download image fit in one 2 GiB release file. squashfs-tools-ng
+# converts through tar, which keeps owners, modes and extended attributes
+# without root; the installer's kernel reads xz squashfs.
+INSTALLER_SQUASHFS = ["/pve-installer.squashfs", "/pve-base.squashfs"]
+
+
+def repack_installer(prepared_iso: Path, iso_sha: str, cache: Path, log=print) -> dict[str, Path]:
+    """Each of the ISO's squashfs images rebuilt with xz, made once per ISO in the cache."""
+    found = {}
+    for iso_path in INSTALLER_SQUASHFS:
+        try:
+            image.extents(prepared_iso, iso_path)
+        except image.ImageError:
+            continue  # not in this ISO (the tests' stand-in has none)
+        out = cache / f"{iso_sha[:16]}-{iso_path.strip('/')}.xz"
+        if not out.exists():
+            log(f"repacking the installer's {iso_path.strip('/')} with xz (a few minutes, once)")
+            with tempfile.TemporaryDirectory(dir=cache) as tmp:
+                original = Path(tmp) / "original.squashfs"
+                image.run(
+                    ["xorriso", "-osirrox", "on", "-indev", str(prepared_iso), "-extract", iso_path, str(original)]
+                )
+                partial = Path(tmp) / "repacked.squashfs"
+                sqfs2tar = subprocess.Popen(["sqfs2tar", str(original)], stdout=subprocess.PIPE)
+                done = subprocess.run(
+                    # The default xz level on every processor: "extreme" took far too long
+                    # (over 10 minutes for 300 MiB on one processor) for little gain.
+                    ["tar2sqfs", "--quiet", "--compressor", "xz", "--comp-extra", "x86",
+                     "--block-size", "1048576", "--num-jobs", str(os.cpu_count() or 1), str(partial)],
+                    stdin=sqfs2tar.stdout, capture_output=True,
+                )  # fmt: skip
+                sqfs2tar.stdout.close()
+                if sqfs2tar.wait() != 0 or done.returncode != 0:
+                    raise BuildError(f"could not repack {iso_path}: {done.stderr.decode(errors='replace').strip()}")
+                partial.replace(out)
+        found[iso_path] = out
+    return found
+
+
 def bundle_lab_files(lock: dict, cache: Path, log=print) -> tuple[dict[str, Path], dict]:
     """Fetch the pinned VM image and tool archives; return (payload files, tools.json)."""
     files: dict[str, Path] = {}
-    ubuntu = lock["ubuntu-cloud-image"]
-    files["images/ubuntu-24.04-server-cloudimg-amd64.img"] = fetch.fetch(
-        ubuntu["url"], ubuntu["sha256"], cache, log=log
-    )
+    machine = lock["lab-machine-image"]
+    files[LAB_IMAGE] = repack(fetch.fetch(machine["url"], machine["sha256"], cache, log=log), log=log)
 
     opn = lock["opnsense"]
-    files["images/opnsense-nano-amd64.img.bz2"] = fetch.fetch(opn["url"], opn["sha256"], cache, log=log)
+    files[OPNSENSE_IMAGE] = repack(fetch.fetch(opn["url"], opn["sha256"], cache, log=log), log=log)
 
     tofu, provider = lock["opentofu"], lock["opentofu-provider-proxmox"]
-    files["tools/opentofu.zip"] = fetch.fetch(tofu["url"], tofu["sha256"], cache, log=log)
-    files["tools/provider-proxmox.zip"] = fetch.fetch(provider["url"], provider["sha256"], cache, log=log)
+    files["tools/opentofu.zip"] = repack_zip(fetch.fetch(tofu["url"], tofu["sha256"], cache, log=log))
+    files["tools/provider-proxmox.zip"] = repack_zip(fetch.fetch(provider["url"], provider["sha256"], cache, log=log))
     collections = []
     for c in lock["ansible-collection"]:
         archive = fetch.fetch(c["url"], c["sha256"], cache, log=log)
@@ -198,9 +306,17 @@ def build(
     lock_path: Path = REPO_LOCK,
     serial_console: bool = False,
     unattended: str | None = None,
+    release: bool = False,
     log=print,
 ) -> Path:
-    cfg, password = defaults.fill_passwords(config.load(config_path))
+    """Build the stick. `release`: an image to publish for download, the same file for everyone,
+    so it holds no password; each lab computer picks its own at first start."""
+    if release:
+        cfg, password_at_install = defaults.lock_passwords(config.load(config_path))
+        password = None
+    else:
+        cfg, password = defaults.fill_passwords(config.load(config_path))
+        password_at_install = False
     lock = fetch.load_lock(lock_path)
     cache = cache or default_cache()
     cache.mkdir(parents=True, exist_ok=True)
@@ -227,6 +343,10 @@ def build(
         repo = work / "debs"
         tools["debian_packages"] = bundle_debs(lock["ansible"], repo, log)
         files.update({f"debs/{f.name}": f for f in repo.iterdir()})
+        if password_at_install:  # read by firstboot.sh
+            flag = work / PASSWORD_AT_INSTALL
+            flag.write_text("This stick holds no password; the lab computer picks its own at first start.\n")
+            files[PASSWORD_AT_INSTALL] = flag
         make_payload(config_path, cfg, files, work / "payload", tools)
         image.make_data(work / "payload", work / "data.img")
 
@@ -244,7 +364,9 @@ def build(
             )
         except (menu.MenuError, initrd.InitrdError) as e:
             raise BuildError(str(e)) from e
-        image.replace_boot_menu(prepared, menu_files, stick)
+        repacked = repack_installer(prepared, iso_sha=pve["sha256"], cache=cache, log=log)
+        image.replace_boot_menu(prepared, {**menu_files, **repacked}, stick)
+        image.blank_replaced(prepared, stick, list(repacked))
         image.assemble(stick, work / "data.img", stick)
         stick.replace(output)
 
@@ -263,6 +385,9 @@ def build(
         note.chmod(0o600)
         log(f"password for the lab: {password}  (also saved in {note.name})")
     return output
+
+
+PASSWORD_AT_INSTALL = "password-at-install"
 
 
 def password_file(output: Path) -> Path:

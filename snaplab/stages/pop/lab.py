@@ -81,7 +81,7 @@ def tofu_vars(
         },
         "machines": [
             {k: m[k] for k in ("vmid", "name", "cpu", "memory_mb", "disk_gb", "vlan", "mac")}
-            | {"template": template["ubuntu"]}
+            | {"template": template["lab"]}
             for m in machines(cfg)
         ],
         "username": spec["username"],

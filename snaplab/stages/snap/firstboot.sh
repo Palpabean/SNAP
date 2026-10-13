@@ -77,6 +77,36 @@ chmod -R go-rwx "$staging"
 rm -rf "$STATE_DIR"
 mv "$staging" "$STATE_DIR"
 
+# A downloaded stick is the same for everyone, so it holds no password
+# (password-at-install, from `snaplab build --release`): this computer picks
+# its own, which the setup screen shows. The guided setup sets one itself.
+if [ -e "$STATE_DIR/password-at-install" ] && [ ! -s "$ROOT/etc/snap/password" ]; then
+    say "choosing this lab's own password (the screen shows it)"
+    SNAP_ROOT="$ROOT" python3 - <<'PY' || fail "could not set this lab's password"
+import json, os, secrets, subprocess
+
+root = os.environ["SNAP_ROOT"]
+alphabet = "abcdefghjkmnpqrstuvwxyz23456789"  # easy to read and type
+password = "-".join("".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(4))
+hashed = subprocess.run(
+    ["openssl", "passwd", "-6", "-stdin"], input=password, capture_output=True, text=True, check=True
+).stdout.strip()
+os.makedirs(f"{root}/etc/snap", mode=0o700, exist_ok=True)
+os.umask(0o077)
+with open(f"{root}/etc/snap/password", "w") as f:
+    f.write(password + "\n")
+# For CRACKLE, POP and BANG: the router and the lab machines get it too.
+path = f"{root}/etc/snap/wizard.json"
+settings = json.load(open(path)) if os.path.exists(path) else {}
+settings.setdefault("host", {})["root_password_hash"] = hashed
+settings.setdefault("machines", {})["password_hash"] = hashed
+with open(path, "w") as f:
+    json.dump(settings, f, indent=2)
+if not root:
+    subprocess.run(["usermod", "-p", hashed, "root"], check=True)
+PY
+fi
+
 mkdir -p "$(dirname "$UNIT")" "$ROOT/usr/local/bin"
 ln -sf /var/lib/snap/bin/snap "$ROOT/usr/local/bin/snap"
 cat >"$UNIT" <<'EOF'

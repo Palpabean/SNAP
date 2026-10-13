@@ -286,7 +286,7 @@ const SNAP = (() => {
       if (n.rules && n.rules.length) out.rules = n.rules;
       return out;
     });
-    const machines = { count: Number(m.count), name_prefix: m.name_prefix, image: m.image || "ubuntu-24.04",
+    const machines = { count: Number(m.count), name_prefix: m.name_prefix, image: m.image || "alpine-3.22",
       cpu: Number(m.cpu), memory_mb: Number(m.memory_gb) * 1024, disk_gb: Number(m.disk_gb),
       network: m.network, username: m.username, mode: m.mode };
     if (m.ssh_key) machines.ssh_keys = [m.ssh_key];
@@ -364,9 +364,9 @@ const SNAP = (() => {
     machines() {
       const m = s.machines;
       nav('<button type="button" onclick="SNAP.back()">Back</button>', '<button type="button" class="p" onclick="SNAP.next()">Next: Firewall</button>');
-      return `<h1>Lab machines</h1><p class="d">How many Ubuntu machines to create, and how big each one is.</p>
+      return `<h1>Lab machines</h1><p class="d">How many Linux machines (Alpine Linux, small and quick) to create, and how big each one is.</p>
         <div class="r">${field("m-count", "Number of machines", m.count)}
-          ${select("m-image", "Operating system", "ubuntu-24.04", [["ubuntu-24.04", "Ubuntu 24.04 LTS (on the stick, no internet needed)"]])}
+          ${select("m-image", "Operating system", "alpine-3.22", [["alpine-3.22", "Alpine Linux 3.22 (on the stick)"]])}
           ${field("m-prefix", "Name", m.name_prefix, { hint: `Machines are named ${m.name_prefix || "name"}-01, ${m.name_prefix || "name"}-02, ...` })}</div>
         <div class="r">${field("m-cpu", "Processors each", m.cpu)}${field("m-memory", "Memory each (GB)", m.memory_gb)}${field("m-disk", "Disk each (GB)", m.disk_gb)}</div>
         <div class="r">${field("m-user", "User name", m.username, { hint: "Signs in with the password from step 1." })}
@@ -402,7 +402,7 @@ const SNAP = (() => {
         <div class="r"><div style="flex:1">
           <div class="k"><i>Computer</i>${esc(p.host.hostname)}.${esc(p.host.domain)}, ${esc(p.host.timezone)}</div>
           <div class="k"><i>Networks</i>${p.networks.map((n) => esc(n.name + " " + n.cidr)).join(", ")}</div>
-          <div class="k"><i>Machines</i>${m.mode === "create" ? `${m.count} x Ubuntu 24.04, ${m.cpu} CPU, ${m.memory_mb / 1024} GB, ${m.disk_gb} GB, on ${esc(m.network)}` : "template only"}</div>
+          <div class="k"><i>Machines</i>${m.mode === "create" ? `${m.count} x Alpine Linux 3.22, ${m.cpu} CPU, ${m.memory_mb / 1024} GB, ${m.disk_gb} GB, on ${esc(m.network)}` : "template only"}</div>
           <div class="k"><i>Firewall</i>${p.networks.map((n) => esc(n.name + ": " + POLICIES.find((x) => x[0] === n.policy)[1].toLowerCase())).join(". ")}</div>
           <div class="k"><i>Password</i><span class="pw" style="font-size:16px">${esc(s.password)}</span></div>
         </div><div style="flex:1;display:flex;flex-direction:column;gap:10px">

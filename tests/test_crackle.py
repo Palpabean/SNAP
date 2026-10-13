@@ -1,4 +1,5 @@
 import json
+import lzma
 import os
 import stat
 import zipfile
@@ -11,7 +12,7 @@ from snaplab.core.engine import PROGRESS_DIR, Context, Engine
 from snaplab.stages.crackle import stage as crackle
 from snaplab.stages.crackle import tools
 
-IMAGE = f"/var/lib/snap/{crackle.UBUNTU_IMAGE}"
+IMAGE = f"/var/lib/snap/{crackle.LAB_IMAGE}"
 
 
 COLLECTIONS = [
@@ -23,7 +24,8 @@ COLLECTIONS = [
 
 def stock_payload(host):
     """What the stick brings: the image, tool archives, Debian packages and tools.json."""
-    host.write(IMAGE, "fake qcow2")
+    host.write(IMAGE, "")
+    host.path(IMAGE).write_bytes(lzma.compress(b"fake disk" + bytes(9 * 1024 * 1024) + b"end"))
     payload = host.path("/var/lib/snap")
     (payload / "tools").mkdir(parents=True)
     with zipfile.ZipFile(payload / "tools/opentofu.zip", "w") as z:
@@ -79,9 +81,10 @@ def test_crackle_sets_up_a_fresh_host(pve):
     # Storage keeps its defaults and gains snippets and imports.
     assert pve.local_content == {"iso", "vztmpl", "backup", "snippets", "import"}
     # Template from the shipped image, on the lab bridge.
-    vm = pve.vms[crackle.UBUNTU_VMID]
-    assert vm["template"] == "1" and vm["name"] == crackle.UBUNTU_NAME
-    assert f"import-from=/var/lib/snap/{crackle.UBUNTU_IMAGE}" in vm["scsi0"]
+    vm = pve.vms[crackle.LAB_TEMPLATE_VMID]
+    assert vm["template"] == "1" and vm["name"] == crackle.LAB_TEMPLATE_NAME
+    assert f"import-from={crackle.LAB_RAW}" in vm["scsi0"]
+    assert not pve.exists(crackle.LAB_RAW)  # the unpacked copy is removed after the import
     assert vm["net0"] == "virtio,bridge=vmbr1"
 
 
@@ -111,23 +114,23 @@ def test_failure_is_recorded_and_resume_continues_from_there(pve):
     state = json.loads(pve.read("/var/lib/snap/state.json"))
     steps = state["stages"]["crackle"]["steps"]
     assert steps["lab-bridge"]["status"] == "done"
-    assert steps["ubuntu-template"]["status"] == "failed"
-    assert "storage full" in steps["ubuntu-template"]["error"]
-    assert any("Create the Ubuntu 24.04 VM template: " in m and "storage full" in m for m in messages)
+    assert steps["lab-template"]["status"] == "failed"
+    assert "storage full" in steps["lab-template"]["error"]
+    assert any("Create the Alpine Linux VM template: " in m and "storage full" in m for m in messages)
 
     # The half-made VM from the failed attempt is replaced on resume.
     del pve.fail["template"]
     assert engine(pve).resume()
-    assert pve.vms[crackle.UBUNTU_VMID]["template"] == "1"
+    assert pve.vms[crackle.LAB_TEMPLATE_VMID]["template"] == "1"
     assert ("qm", "destroy", "9000", "--purge", "1", "--destroy-unreferenced-disks", "1") in pve.calls
 
 
 def test_someone_elses_vm_is_never_destroyed(pve):
-    pve.vms[crackle.UBUNTU_VMID] = {"name": "my-important-vm"}
+    pve.vms[crackle.LAB_TEMPLATE_VMID] = {"name": "my-important-vm"}
     assert not engine(pve).resume()
-    assert pve.vms[crackle.UBUNTU_VMID] == {"name": "my-important-vm"}
+    assert pve.vms[crackle.LAB_TEMPLATE_VMID] == {"name": "my-important-vm"}
     state = json.loads(pve.read("/var/lib/snap/state.json"))
-    assert "is not SNAP's" in state["stages"]["crackle"]["steps"]["ubuntu-template"]["error"]
+    assert "is not SNAP's" in state["stages"]["crackle"]["steps"]["lab-template"]["error"]
 
 
 def test_missing_image_fails_preflight_before_changing_anything(pve):
@@ -135,7 +138,7 @@ def test_missing_image_fails_preflight_before_changing_anything(pve):
     assert not engine(pve).resume()
     assert not pve.exists(crackle.NO_SUBSCRIPTION)
     state = json.loads(pve.read("/var/lib/snap/state.json"))
-    assert "Ubuntu image is missing" in state["stages"]["crackle"]["error"]
+    assert "lab machine image is missing" in state["stages"]["crackle"]["error"]
 
 
 def test_waits_for_api(pve, monkeypatch):
@@ -180,7 +183,7 @@ def test_status_and_cli(pve, capsys, monkeypatch):
     out = capsys.readouterr().out
     assert "SNAP: CRACKLE (host setup) done" in out and "SNAP: Your lab is ready." in out
     assert hostcli.main(["status"], host=pve) == 0
-    assert "  - Create the Ubuntu 24.04 VM template: done" in capsys.readouterr().out
+    assert "  - Create the Alpine Linux VM template: done" in capsys.readouterr().out
     assert hostcli.main(["logs"], host=pve) == 0
     assert "CRACKLE (host setup) done" in capsys.readouterr().out
 

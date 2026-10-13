@@ -12,7 +12,7 @@ FROM debian:trixie-slim
 ARG ASSISTANT_VERSION=9.2.8
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl python3 python3-yaml python3-jsonschema \
-      xorriso e2fsprogs fdisk openssl zstd \
+      xorriso e2fsprogs fdisk openssl zstd xz-utils qemu-utils squashfs-tools-ng \
  && curl -fsSL https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg \
       -o /usr/share/keyrings/proxmox-archive-keyring.gpg \
  && printf '%s\n' 'Types: deb' 'URIs: http://download.proxmox.com/debian/pve' 'Suites: trixie' \

@@ -17,12 +17,12 @@ import time
 
 from snaplab.core.engine import Context, Stage, Step
 from snaplab.stages.crackle import tools as crackle_tools
-from snaplab.stages.crackle.stage import UBUNTU_VMID, VM_STORAGE
+from snaplab.stages.crackle.stage import LAB_TEMPLATE_VMID, VM_STORAGE
 from snaplab.stages.pop import addresses, lab, network, opnsense
 
 OPNSENSE_VMID = 9001
 OPNSENSE_NAME = "snap-opnsense-261"
-OPNSENSE_ARCHIVE = "images/opnsense-nano-amd64.img.bz2"
+OPNSENSE_ARCHIVE = "images/opnsense-nano-amd64.img.xz"  # repacked by the builder
 
 WORK = "/var/lib/snap/pop"
 TOFU_DIR = f"{WORK}/tofu"
@@ -81,7 +81,7 @@ def make_template(ctx: Context) -> None:
             raise RuntimeError(f"VM {vmid} already exists and is not SNAP's; free that ID and resume")
         ctx.host.run("qm", "destroy", vmid, "--purge", "1", "--destroy-unreferenced-disks", "1")
     raw = f"{WORK}/opnsense-nano.img"
-    ctx.host.decompress_bz2(f"{ctx.payload}/{OPNSENSE_ARCHIVE}", raw)
+    ctx.host.unpack(f"{ctx.payload}/{OPNSENSE_ARCHIVE}", raw)
     try:
         ctx.host.run(
             "qm", "create", vmid,
@@ -156,7 +156,7 @@ def make_router_config(ctx: Context) -> None:
 
 
 def _templates() -> dict[str, int]:
-    return {"opnsense": OPNSENSE_VMID, "ubuntu": UBUNTU_VMID}
+    return {"opnsense": OPNSENSE_VMID, "lab": LAB_TEMPLATE_VMID}
 
 
 def _ssh_keys(ctx: Context) -> list[str]:
@@ -226,10 +226,15 @@ def make_router(ctx: Context) -> None:
 # --- 6. router settings through the API (Ansible) ----------------------------
 
 
+# Files the playbooks use, copied next to them (verify.yml runs labcheck.py on the machines).
+PLAYBOOK_FILES = ["labcheck.py"]
+
+
 def _playbook(ctx: Context, name: str, *args: str) -> None:
     ctx.host.mkdir(ANSIBLE_DIR, mode=0o700)
     playbook = f"{ANSIBLE_DIR}/{name}"
-    ctx.host.write(playbook, ctx.host.read(_source(ctx, "stages", "pop", "ansible", name)) or "")
+    for file in (name, *PLAYBOOK_FILES):
+        ctx.host.write(f"{ANSIBLE_DIR}/{file}", ctx.host.read(_source(ctx, "stages", "pop", "ansible", file)) or "")
     ctx.host.run(*ENV, "ansible-playbook", playbook, *args)
 
 
@@ -321,7 +326,7 @@ def preflight(ctx: Context) -> list[str]:
     problems = []
     if not ctx.host.exists(f"{ctx.payload}/{OPNSENSE_ARCHIVE}") and not template_done(ctx):
         problems.append(f"the OPNsense image is missing from {ctx.payload}/images; rebuild the USB stick")
-    for name in (("tofu", "main.tf"), ("ansible", "router.yml"), ("ansible", "verify.yml")):
+    for name in (("tofu", "main.tf"), ("ansible", "router.yml"), ("ansible", "verify.yml"), ("ansible", "labcheck.py")):
         if not ctx.host.exists(_source(ctx, "stages", "pop", *name)):
             problems.append(f"{'/'.join(name)} is missing from the engine; rebuild the USB stick")
     if not ctx.host.exists(crackle_tools.API_SECRET):

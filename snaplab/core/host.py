@@ -8,8 +8,8 @@ python3 but none of the builder's packages.
 from __future__ import annotations
 
 import bz2
+import lzma
 import os
-import shutil
 import ssl
 import subprocess
 import urllib.request
@@ -107,13 +107,21 @@ class Host:
             (target / name).chmod(mode)
         return names
 
-    def decompress_bz2(self, archive: str | Path, dest: str | Path) -> None:
-        """Decompress a .bz2 file to dest, via a temporary name so a cut-off run leaves no half file."""
+    def unpack(self, archive: str | Path, dest: str | Path) -> None:
+        """Decompress a .xz or .bz2 disk image to dest, via a temporary name so a cut-off run leaves
+        no half file. Runs of zeros (a disk image's empty space) are skipped, not written."""
         target = self.path(dest)
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name(f".{target.name}.snap-tmp")
-        with bz2.open(self.path(archive)) as src, tmp.open("wb") as out:
-            shutil.copyfileobj(src, out, length=4 * 1024 * 1024)
+        opener = lzma.open if str(archive).endswith(".xz") else bz2.open
+        chunk = 4 * 1024 * 1024
+        with opener(self.path(archive)) as src, tmp.open("wb") as out:
+            while block := src.read(chunk):
+                if block.count(0) == len(block):
+                    out.seek(len(block), os.SEEK_CUR)
+                else:
+                    out.write(block)
+            out.truncate()
         os.replace(tmp, target)
 
     def remove(self, path: str | Path) -> None:

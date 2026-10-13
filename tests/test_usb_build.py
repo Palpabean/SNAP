@@ -10,14 +10,18 @@ also need QEMU and OVMF. CI's usb-image job installs all of them.
 import bz2
 import gzip
 import json
+import lzma
 import os
+import re
 import select
 import shutil
 import socket
+import stat
 import struct
 import subprocess
 import sys
 import time
+import zipfile
 import zlib
 from pathlib import Path
 
@@ -31,7 +35,7 @@ FIRSTBOOT = ROOT / "snaplab" / "stages" / "snap" / "firstboot.sh"
 OVMF_CODE = Path("/usr/share/OVMF/OVMF_CODE_4M.fd")
 OVMF_VARS = Path("/usr/share/OVMF/OVMF_VARS_4M.fd")
 
-IMAGE_TOOLS = ["xorriso", "grub-mkrescue", "mkfs.ext4", "debugfs", "sfdisk"]
+IMAGE_TOOLS = ["xorriso", "grub-mkrescue", "mkfs.ext4", "debugfs", "sfdisk", "mksquashfs", "sqfs2tar", "tar2sqfs"]
 needs_image_tools = pytest.mark.skipif(
     any(shutil.which(t) is None for t in IMAGE_TOOLS), reason="disk-image tools not installed"
 )
@@ -90,11 +94,11 @@ menuentry 'Install Proxmox VE (Graphical)' --class debian --class gnu-linux --cl
 def make_test_payload(tmp_path):
     from snaplab.core import config
 
-    image_file = tmp_path / "ubuntu.img"
+    image_file = tmp_path / "alpine.img"
     image_file.write_bytes(b"fake cloud image")
     payload = tmp_path / "payload"
     cfg = config.load(EXAMPLE)
-    build.make_payload(EXAMPLE, cfg, {"images/ubuntu-24.04-server-cloudimg-amd64.img": image_file}, payload)
+    build.make_payload(EXAMPLE, cfg, {build.LAB_IMAGE: image_file}, payload)
     return payload, cfg
 
 
@@ -105,12 +109,72 @@ def test_payload_manifest_satisfies_firstboot(tmp_path):
     assert os.access(payload / "bin" / "snap", os.X_OK)
     listed = [line.split("  ", 1)[1] for line in (payload / "payload.sha256").read_text().splitlines()]
     assert {"bin/snap", "snap.yaml", "snap.json", "lib/snaplab/hostcli.py"} <= set(listed)
-    assert "images/ubuntu-24.04-server-cloudimg-amd64.img" in listed
+    assert build.LAB_IMAGE in listed
 
     env = {**os.environ, "SNAP_ROOT": str(tmp_path / "root"), "SNAP_SOURCE": str(payload)}
     result = subprocess.run(["bash", str(FIRSTBOOT)], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout
     assert (tmp_path / "root/var/lib/snap/snap.yaml").read_bytes() == EXAMPLE.read_bytes()
+
+
+def make_release_payload(tmp_path):
+    """A payload as `build --release` makes it: locked passwords and the password-at-install flag."""
+    from snaplab.core import config, defaults
+
+    flag = tmp_path / "flag"
+    flag.write_text("no password on this stick\n")
+    cfg, locked = defaults.lock_passwords(config.load())
+    assert locked
+    payload = tmp_path / "payload"
+    build.make_payload(None, cfg, {build.PASSWORD_AT_INSTALL: flag}, payload)
+    return payload, cfg
+
+
+def firstboot(tmp_path, payload):
+    env = {**os.environ, "SNAP_ROOT": str(tmp_path / "root"), "SNAP_SOURCE": str(payload)}
+    result = subprocess.run(["bash", str(FIRSTBOOT)], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout
+    return tmp_path / "root"
+
+
+def test_downloaded_stick_gets_its_own_password_at_first_start(tmp_path):
+    payload, cfg = make_release_payload(tmp_path)
+    root = firstboot(tmp_path, payload)
+    password = (root / "etc/snap/password").read_text().strip()
+    assert re.fullmatch(r"([a-z2-9]{4}-){3}[a-z2-9]{4}", password)
+    assert stat.S_IMODE((root / "etc/snap/password").stat().st_mode) == 0o600
+    # The router and the lab machines get it too (laid over the stick's settings by `snap`).
+    chosen = json.loads((root / "etc/snap/wizard.json").read_text())
+    hashed = chosen["host"]["root_password_hash"]
+    assert chosen["machines"]["password_hash"] == hashed and hashed != cfg["host"]["root_password_hash"]
+    salt = hashed.split("$")[2]
+    again = subprocess.run(["openssl", "passwd", "-6", "-salt", salt, password], capture_output=True, text=True)
+    assert again.stdout.strip() == hashed
+    assert password not in (root / "var/log/snap/firstboot.log").read_text()  # never in the log
+
+
+def test_each_computer_gets_a_different_password(tmp_path):
+    payload, _ = make_release_payload(tmp_path)
+    first = firstboot(tmp_path / "a", payload) / "etc/snap/password"
+    second = firstboot(tmp_path / "b", payload) / "etc/snap/password"
+    assert first.read_text() != second.read_text()
+
+
+def test_guided_setup_password_is_kept(tmp_path):
+    payload, _ = make_release_payload(tmp_path)
+    root = tmp_path / "root"
+    (root / "etc/snap").mkdir(parents=True)
+    (root / "etc/snap/password").write_text("from-the-wizard\n")
+    (root / "etc/snap/wizard.json").write_text('{"host": {"hostname": "lab1"}}')
+    firstboot(tmp_path, payload)
+    assert (root / "etc/snap/password").read_text() == "from-the-wizard\n"
+    assert json.loads((root / "etc/snap/wizard.json").read_text()) == {"host": {"hostname": "lab1"}}
+
+
+def test_built_stick_keeps_its_build_password(tmp_path):
+    payload, _ = make_test_payload(tmp_path)  # not --release: no flag
+    root = firstboot(tmp_path, payload)
+    assert not (root / "etc/snap/password").exists()
 
 
 def test_engine_on_the_stick_needs_only_the_standard_library(tmp_path):
@@ -151,6 +215,38 @@ def test_missing_tools_are_reported(monkeypatch):
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory):
+    return build_stick(tmp_path_factory, EXAMPLE)
+
+
+@pytest.fixture(scope="module")
+def released(tmp_path_factory):
+    """The image to publish for download: the built-in lab, no password in it."""
+    return build_stick(tmp_path_factory, None, release=True)
+
+
+def make_standin_squashfs(out: Path, tree: Path) -> None:
+    (tree / "usr/bin").mkdir(parents=True)
+    (tree / "usr/bin/tool").write_bytes(b"#!/bin/sh\necho stand-in\n" + os.urandom(200_000))
+    (tree / "usr/bin/tool").chmod(0o4755)
+    (tree / "etc").mkdir()
+    (tree / "etc/hostname").write_text("proxmox\n")
+    (tree / "etc/hostname").chmod(0o600)
+    (tree / "usr/bin/link").symlink_to("tool")
+    subprocess.run(
+        ["mksquashfs", str(tree), str(out), "-comp", "zstd", "-quiet", "-no-progress", "-all-root"],
+        check=True,
+        capture_output=True,
+    )
+
+
+def listing(squashfs: Path) -> list[str]:
+    """Each file's mode, owner, size, name and link target, through a tar listing."""
+    tar = subprocess.run(["sqfs2tar", str(squashfs)], check=True, capture_output=True).stdout
+    out = subprocess.run(["tar", "-tvf", "-", "--numeric-owner"], input=tar, check=True, capture_output=True)
+    return sorted(" ".join(line.split()[:3] + line.split()[5:]) for line in out.stdout.decode().splitlines())
+
+
+def build_stick(tmp_path_factory, config_path, **options):
     if any(shutil.which(t) is None for t in IMAGE_TOOLS):
         pytest.skip("disk-image tools not installed")
     tmp = tmp_path_factory.mktemp("usb")
@@ -159,6 +255,9 @@ def built(tmp_path_factory):
     (root / "grub.cfg").write_text(STANDIN_GRUB_CFG)
     (root.parent / "linux26").write_text("stand-in kernel\n")
     (root.parent / "initrd.img").write_bytes(STANDIN_INITRD)
+    # The installer's filesystems in miniature, compressed with zstd like Proxmox's.
+    for name in build.INSTALLER_SQUASHFS:
+        make_standin_squashfs(tmp / "isoroot" / name.strip("/"), tmp / name.strip("/").replace(".", "-"))
     iso = tmp / "mirror" / "proxmox-ve_9.2-1.iso"
     iso.parent.mkdir()
     subprocess.run(["grub-mkrescue", "-o", str(iso), str(tmp / "isoroot")], check=True, capture_output=True)
@@ -168,8 +267,8 @@ def built(tmp_path_factory):
     stub = bindir / build.ASSISTANT
     stub.write_text(STUB_ASSISTANT)
     stub.chmod(0o755)
-    ubuntu = tmp / "mirror" / "ubuntu-24.04-server-cloudimg-amd64.img"
-    ubuntu.write_bytes(b"stand-in cloud image")
+    machine = tmp / "mirror" / "generic_alpine-3.22.5-x86_64-bios-cloudinit-r0.qcow2"
+    machine.write_bytes(b"stand-in cloud image")
     nano = tmp / "mirror" / "OPNsense-1-nano-amd64.img.bz2"
     nano.write_bytes(bz2.compress(b"stand-in router image"))
 
@@ -179,13 +278,17 @@ def built(tmp_path_factory):
     tofu = tmp / "mirror" / "tofu_1_linux_amd64.zip"
     provider = tmp / "mirror" / "terraform-provider-proxmox_1_linux_amd64.zip"
     collection = tmp / "mirror" / "oxlorg-opnsense-1.tar.gz"
-    for f in (tofu, provider, collection):
-        f.write_bytes(f.name.encode())
+    for f, member in ((tofu, "tofu"), (provider, "terraform-provider-proxmox_v1")):
+        with zipfile.ZipFile(f, "w", zipfile.ZIP_DEFLATED) as z:
+            info = zipfile.ZipInfo(member)
+            info.external_attr = 0o100755 << 16  # an executable, as published
+            z.writestr(info, b"#!/bin/sh\necho stand-in\n" * 1000)
+    collection.write_bytes(collection.name.encode())
     lock = tmp / "checksums.lock"
     lock.write_text(
         f'[proxmox-ve]\nversion = "9.2-1"\nurl = "{iso.as_uri()}"\nsha256 = "{fetch.sha256(iso)}"\n'
         '[proxmox-auto-install-assistant]\nversion = "9.2.8"\n'
-        + entry("ubuntu-cloud-image", ubuntu)
+        + entry("lab-machine-image", machine)
         + entry("opnsense", nano)
         + entry("opentofu", tofu)
         + entry("opentofu-provider-proxmox", provider, 'source = "registry.opentofu.org/bpg/proxmox"\n')
@@ -207,7 +310,9 @@ def built(tmp_path_factory):
     mp.setattr(build, "assistant_version", lambda: "9.2.8")
     mp.setattr(build, "bundle_debs", fake_bundle_debs)
     try:
-        out = build.build(EXAMPLE, tmp / "snap.img", cache=tmp / "cache", lock_path=lock, log=lambda _: None)
+        out = build.build(
+            config_path, tmp / "snap.img", cache=tmp / "cache", lock_path=lock, log=lambda _: None, **options
+        )
     finally:
         mp.undo()
     return out, iso
@@ -250,6 +355,56 @@ def test_data_partition(built, tmp_path):
 
     assert cat("/snap.yaml") == EXAMPLE.read_bytes()
     assert b"bin/snap" in cat("/payload.sha256")
+
+
+@needs_image_tools
+def test_download_image_holds_no_password(released):
+    img, _ = released
+    assert not build.password_file(img).exists()
+    toml = (img.parent / "cache" / "last-answer.toml").read_text()
+    assert 'root-password-hashed = "$6$' in toml  # locked: a random password nobody knows
+    data = partitions(img)["SNAPDATA"]
+    with img.open("rb") as f:
+        f.seek(data["start"] * 512)
+        part = img.parent / "data.img"
+        part.write_bytes(f.read(data["size"] * 512))
+    listing = subprocess.run(["debugfs", "-R", "ls -p /", str(part)], capture_output=True, text=True).stdout
+    assert build.PASSWORD_AT_INSTALL in listing  # so the lab computer picks its own
+
+
+@needs_image_tools
+def test_tool_archives_are_repacked_with_lzma(built, tmp_path):
+    img, _ = built
+    data = partitions(img)["SNAPDATA"]
+    part = tmp_path / "data.img"
+    with img.open("rb") as f, part.open("wb") as out:
+        f.seek(data["start"] * 512)
+        out.write(f.read(data["size"] * 512))
+    packed = tmp_path / "tofu.zip"
+    packed.write_bytes(
+        subprocess.run(["debugfs", "-R", "cat /tools/opentofu.zip", str(part)], check=True, capture_output=True).stdout
+    )
+    with zipfile.ZipFile(packed) as z:
+        (info,) = z.infolist()
+        assert info.compress_type == zipfile.ZIP_LZMA and info.external_attr >> 16 == 0o100755
+        assert z.read("tofu") == b"#!/bin/sh\necho stand-in\n" * 1000
+
+
+@needs_image_tools
+def test_installer_filesystems_are_repacked_with_xz(built, tmp_path):
+    img, iso = built
+    for name in build.INSTALLER_SQUASHFS:
+        before, after = tmp_path / "before.squashfs", tmp_path / "after.squashfs"
+        before.write_bytes(image.read_bytes(iso, name))
+        after.write_bytes(image.read_bytes(img, name))
+        info = subprocess.run(["unsquashfs", "-s", str(after)], check=True, capture_output=True, text=True).stdout
+        assert "Compression xz" in info
+        assert listing(after) == listing(before)  # same files, modes, owners, sizes and links
+        # The old copy is blanked: zeros, which cost nothing in the download.
+        with img.open("rb") as f:
+            for start, length in image.extents(iso, name):
+                f.seek(start)
+                assert f.read(length).count(0) == length
 
 
 @needs_image_tools
@@ -483,13 +638,21 @@ def test_tools_travel_on_the_stick(built, tmp_path):
         "tools/provider-proxmox.zip",
         "debs/Packages",
         "tools.json",
-        "images/opnsense-nano-amd64.img.bz2",
+        build.OPNSENSE_IMAGE,
+        build.LAB_IMAGE,
         "lib/snaplab/stages/pop/tofu/main.tf",
         "lib/snaplab/stages/pop/ansible/router.yml",
         "lib/snaplab/stages/pop/ansible/verify.yml",
     ):
         assert name in manifest
     assert "collections/oxlorg-opnsense-1.tar.gz" in manifest
+    # The VM images, repacked as xz, unpack to exactly what was downloaded.
+    for name, original in (
+        (build.OPNSENSE_IMAGE, b"stand-in router image"),
+        (build.LAB_IMAGE, b"stand-in cloud image"),
+    ):
+        packed = subprocess.run(["debugfs", "-R", f"cat /{name}", str(part)], check=True, capture_output=True).stdout
+        assert lzma.decompress(packed) == original
     tools_json = json.loads(
         subprocess.run(["debugfs", "-R", "cat /tools.json", str(part)], check=True, capture_output=True).stdout
     )

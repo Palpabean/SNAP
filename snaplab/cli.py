@@ -32,6 +32,11 @@ def main(argv: list[str] | None = None) -> int:
         help="for automated tests: run the guided setup by itself with its defaults (wizard), "
         "or make the no-questions install the default (text)",
     )
+    usb.add_argument(
+        "--release",
+        action="store_true",
+        help="an image to publish for download: no password in it; each lab computer picks its own",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -55,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
                 cache=args.cache,
                 serial_console=args.serial_console,
                 unattended=args.unattended,
+                release=args.release,
             )
         except (build.BuildError, fetch.FetchError, image.ImageError) as e:
             print(f"build failed: {e}", file=sys.stderr)

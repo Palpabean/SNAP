@@ -39,7 +39,7 @@ The lab's networks. You can keep them as they are, change them, or add more.
 
 ### 5. Machines
 
-How many Ubuntu machines to make, and how big each one is.
+How many Linux machines (Alpine Linux) to make, and how big each one is.
 
 ![Machines](06-machines.png)
 

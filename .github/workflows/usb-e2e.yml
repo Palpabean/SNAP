@@ -3,7 +3,7 @@ name: USB end-to-end
 # Build a stick from the real, pinned Proxmox ISO and run it for real in QEMU
 # with KVM: unattended install, restart, stick boots the install, handoff, then
 # CRACKLE, POP and BANG on the host (the lab VMs run nested). BIOS takes the
-# no-questions text install; UEFI runs the graphical setup wizard by itself
+# no-questions text install from the download image (--release); UEFI runs the graphical setup wizard by itself
 # (snap.wizard=auto), with pictures of its screens kept.
 on:
   push:
@@ -26,10 +26,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # BIOS: the download image (--release), so the lab computer picks its own password.
           - firmware: bios
             setup: text
+            build: --release
           - firmware: uefi
             setup: wizard
+            build: ""
     env:
       WORK: ${{ github.workspace }}/e2e-work
     steps:
@@ -53,9 +56,13 @@ jobs:
       - name: Build the USB image
         run: |
           docker run --rm -v "$PWD:/work" snaplab-builder build tests/usb/e2e.yaml -o snap.img --serial-console \
-            --unattended ${{ matrix.setup }}
-          sudo chown -R "$(id -u)" .snaplab-cache snap.img snap.img.sha256 snap.img.password.txt
-          test -s snap.img.password.txt  # no passwords in the config: the builder made one
+            --unattended ${{ matrix.setup }} ${{ matrix.build }}
+          sudo chown -R "$(id -u)" .snaplab-cache snap.img*
+          if [ -n "${{ matrix.build }}" ]; then
+            test ! -e snap.img.password.txt  # a download image holds no password
+          else
+            test -s snap.img.password.txt  # no passwords in the config: the builder made one
+          fi
       - name: Install, restart, hand off
         run: tests/usb/e2e.sh snap.img ${{ matrix.firmware }} ${{ matrix.setup }}
       - name: Keep the serial logs

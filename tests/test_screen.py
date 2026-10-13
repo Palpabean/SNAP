@@ -84,7 +84,7 @@ def test_lab_ready_shows_how_to_log_in_and_what_was_built(computer):
     assert "User name:              root" in out and "Password:               ab3k-9xqe-7tmd-p2wr" in out
     assert "lab        10.10.10.0/24    internet only" in out
     assert "services   10.10.20.0/24    isolated" in out
-    assert "ubuntu-01  10.10.10.100     user labuser" in out and "ubuntu-02" in out
+    assert "alpine-01  10.10.10.100     user labuser" in out and "alpine-02" in out
     assert "choose Advanced, then Continue" in out
 
 
@@ -94,7 +94,7 @@ def test_ready_screen_shows_addresses_pop_moved(computer):
     placed = {"networks": {"lab": "10.10.30.0/24", "services": "10.10.20.0/24"}, "admin": "172.31.255.0/29"}
     computer.write(addresses.PLAN_FILE, json.dumps({"for": [], "busy": [], "placed": placed}))
     out = text(computer)
-    assert "lab        10.10.30.0/24" in out and "ubuntu-01  10.10.30.100" in out
+    assert "lab        10.10.30.0/24" in out and "alpine-01  10.10.30.100" in out
 
 
 def test_no_password_file_points_to_the_saved_one(computer):

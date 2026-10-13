@@ -1,5 +1,5 @@
 # The lab's virtual machines (Design 0001, D7): the OPNsense router and the
-# Ubuntu machines, cloned from the templates CRACKLE and POP made.
+# Alpine lab machines, cloned from the templates CRACKLE and POP made.
 #
 # POP writes lab.auto.tfvars.json from snap.yaml and applies this in
 # /var/lib/snap/tofu. To change the lab later, edit the variables and run
@@ -124,7 +124,7 @@ resource "proxmox_virtual_environment_vm" "machine" {
     full  = false # linked clone: fast and small
   }
 
-  # The Ubuntu cloud image has no guest agent installed (and is offline), so the
+  # The Alpine cloud image has no guest agent installed (and is offline), so the
   # provider must not wait for one to report addresses; the router's DHCP
   # reservations fix them instead.
   agent {

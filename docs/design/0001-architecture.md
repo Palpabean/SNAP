@@ -10,7 +10,7 @@
 
 ## 1. Summary
 
-SNAP (Swift Network Automation Program) turns a bare computer into a self-contained virtual lab. A user builds a USB stick with one command, boots the computer from it, and walks away; the stick asks only which disk to use, and only when there is more than one (D9). The computer is installed with Proxmox VE, configured, given a virtual router and firewall (OPNsense), and populated with Ubuntu VMs on isolated test networks. Everything needed is on the stick, so no internet connection is required.
+SNAP (Swift Network Automation Program) turns a bare computer into a self-contained virtual lab. A user builds a USB stick with one command, boots the computer from it, and walks away; the stick asks only which disk to use, and only when there is more than one (D9). The computer is installed with Proxmox VE, configured, given a virtual router and firewall (OPNsense), and populated with small Linux VMs (Alpine Linux) on isolated test networks. Everything needed is on the stick, so no internet connection is required.
 
 The work is divided into four named stages:
 
@@ -70,7 +70,7 @@ USER'S COMPUTER                                    TARGET COMPUTER
                                              7. Handoff to the new system
                                                 (USB no longer needed after this)
                                              -- CRACKLE --
-                                             8. Host config, Ubuntu + OPNsense templates
+                                             8. Host config, Alpine + OPNsense templates
                                              -- POP --
                                              9. OPNsense, networks, test VMs, tests
                                              -- BANG --
@@ -83,12 +83,12 @@ USER'S COMPUTER                                    TARGET COMPUTER
 ## 5. Components
 
 ### 5.1 SNAP Builder (runs on the user's own computer)
-- Downloads the Proxmox, Ubuntu, and OPNsense images from their official sources.
+- Downloads the Proxmox, Alpine Linux, and OPNsense images from their official sources.
 - Verifies each against a pinned SHA-256 in `checksums.lock`.
 - Prepares the Proxmox auto-install media with Proxmox's own `proxmox-auto-install-assistant prepare-iso --fetch-from partition --on-first-boot snap-firstboot.sh`. The assistant version is pinned to match the ISO version, because mismatches are a known source of answer-file errors.
 - Prepares the bundle (engine, stages, offline packages, the OpenTofu binary and the `bpg/proxmox` provider mirrored for offline use).
 - Writes the USB. Initially requires Linux (or WSL/container) because it assembles a live image.
-- The project never hosts or redistributes the Proxmox, Ubuntu, or OPNsense images.
+- The project never hosts or redistributes the Proxmox, Alpine Linux, or OPNsense images in source form (the published download image carries them as the stick needs them).
 
 ### 5.2 The USB
 The stick is the Proxmox installer's own hybrid ISO, written from the first sector exactly as Proxmox intends, with two partitions appended after it:
@@ -107,6 +107,7 @@ The stick is the Proxmox installer's own hybrid ISO, written from the first sect
 - **`SNAPDATA`** holds `payload.sha256` (a `sha256sum` manifest of every other file), `snap.yaml`, `bin/snap` (the engine entry point), and the rest of the payload.
 - The builder works on a regular file (xorriso, mkfs.ext4, sfdisk): no root, no loop devices. It runs in the container from `snaplab/delivery/usb/Containerfile`.
 - **No config file is needed.** With none, the builder uses SNAP's built-in lab (`snaplab/core/defaults.py`); a `snap.yaml` may give only the settings it changes. Passwords not given are generated (one for Proxmox, the router and the lab machines), printed at the end of the build and saved next to the image. A `target_disk` serial or model can still be given; then the stick asks nothing.
+- **The download image** (`snaplab build --release`, published by `.github/workflows/release.yml` when a `v*` tag is pushed, as `snap.img.xz`): the built-in lab, the same file for everyone, so it holds no password. Missing password hashes are filled with the hash of a random password that is thrown away (the accounts stay locked), and the payload carries `password-at-install`: at first start `snap-firstboot.sh` picks this computer's own password, sets it for root, saves it to `/etc/snap/password` (root-only, shown by the lab computer's screen) and lays its hash over the stick's settings through `/etc/snap/wizard.json`, so the router and lab machines get it too. The guided setup's own password is kept when it set one. One release file must stay under GitHub's 2 GiB limit; the workflow checks it.
 
 ### 5.3 The setup wizard (graphical)
 **Replaces the terminal wizard planned below** (kept after this list for reference). The guided-setup entry starts Proxmox's own installer environment, which already has a graphical desktop (Xorg, openbox) and a web view (Perl Gtk3 and WebKitGTK, what Proxmox's own installer window is made of). SNAP shows its own window there instead:
@@ -165,7 +166,7 @@ CRACKLE sets up the host with Proxmox's own tools (`pvesh`, `pvesm`, `qm`, `pveu
 2. Package sources: add the free `pve-no-subscription` repository and disable the subscription-only enterprise repositories (PVE and Ceph). Offline this changes nothing until the host gets a network.
 3. Create the internal lab bridge `vmbr1`: VLAN-aware, no physical port, so lab traffic only leaves through the router (POP). The uplink bridge `vmbr0` from the installer and the management connection are left alone.
 4. Storage: enable `snippets` (cloud-init) and `import` content on `local`, keeping Proxmox's defaults; VM disks go to `local-lvm`.
-5. Turn the Ubuntu 24.04 cloud image shipped on the stick (pinned in `checksums.lock`) into template VM 9000, `snap-ubuntu-2404`: cloud-init drive, serial console, guest agent, on `vmbr1`. A half-made VM from an interrupted attempt is replaced; a VM 9000 that is not SNAP's stops the stage instead.
+5. Turn the Alpine Linux 3.22 cloud image shipped on the stick (pinned in `checksums.lock`, repacked as a raw image with xz) into template VM 9000, `snap-alpine-322`: cloud-init drive, serial console, on `vmbr1`. Alpine because the download image must fit in one 2 GiB release file: 73 MiB on the stick against 159 MiB for Ubuntu's minimal image. The lab check (`labcheck.py`) uses only Python, so it does not depend on the distribution's tools. A half-made VM from an interrupted attempt is replaced; a VM 9000 that is not SNAP's stops the stage instead.
 6. Install OpenTofu (`/usr/local/bin/tofu`) and the `bpg/proxmox` provider as a local filesystem mirror, with `/root/.tofurc` pointing at it, so `tofu init` works offline.
 7. Install Ansible (`ansible-core`, `python3-httpx`) with apt pointed only at the Debian packages on the stick; the host's own package sources are not touched and newer installed versions are kept.
 8. Install the Ansible collections (`oxlorg.opnsense` and its dependencies) offline into `/usr/share/ansible/collections`.
@@ -185,7 +186,7 @@ POP first places the lab's address ranges: any lab network, or the admin network
 4. **Bootstrap config.** Generate an API key (kept root-only in `/var/lib/snap/secrets/opnsense-api.json`), render `config.xml` (interfaces in VM card order: WAN on `vmbr0`, the admin network, then one per lab network on its VLAN; the root password from `snap.yaml`; the API key; admin-network rules for the API, SSH and ping) and pack it into `snap-router-config.iso` under `conf/`.
 5. **Router.** OpenTofu clones VM 100 (`snap-router`) from the template, stopped, with the ISO attached. POP starts it, answers the importer on the serial console (D2), then waits for the API. If that first boot was missed, the router is recreated, because the importer is offered only once.
 6. **Router settings through the API** (Ansible, `oxlorg.opnsense`): a private-ranges alias, the firewall rules, the DHCP server (Kea) with one range per network, and a reservation for each lab machine. Rules per network, in order: no access to the admin network; DNS and ping to the router's own address on that network; the custom `rules`; then the policy (*isolated*: nothing more; *internet-only*: anything that is not a private range; *open*: anything).
-7. **Lab machines** (OpenTofu): linked clones of the Ubuntu template on their network's VLAN, with fixed MAC addresses so the reservations apply, and the user and keys through cloud-init. `templates-only` creates none.
+7. **Lab machines** (OpenTofu): linked clones of the Alpine template on their network's VLAN, with fixed MAC addresses so the reservations apply, and the user and keys through cloud-init. `templates-only` creates none.
 8. **Check from inside** (Ansible, over the admin network): each machine has its reserved address, reaches the router, resolves the router's name through it, and reaches the other networks only where its policy allows.
 
 The OpenTofu working directory (`/var/lib/snap/pop/tofu`) and the generated Ansible files stay on the host, so the lab can be changed later by editing the variables and applying again. The host's own management connection stays on the existing network. Moving it behind the router is an optional later feature that must use a confirm-or-revert timer; the "network change undone" screen exists for that case.
@@ -286,7 +287,7 @@ The code lives in one Python package, `snaplab`, so the parts can import each ot
 | D4 | **Terraform licensing** | **OpenTofu only.** It is MPL-2.0, so it can be redistributed on the USB, and it uses the same `bpg/proxmox` provider. Terraform is not shipped or tested. |
 | D5 | **Repository name** | **`snaplab`.** The project and stage names stay SNAP, CRACKLE, POP and BANG; the command stays `snap`. |
 | D6 | **Remote-access name** | **ECHO** (`snap echo`). |
-| D7 | **Provisioning and configuration tools** | **Both, run on the Proxmox host** (decided by the project owner). **OpenTofu** with `bpg/proxmox` creates and scales the lab's VMs and networks from `snap.yaml`, so changing the lab later means editing the file and re-applying. **Ansible** configures and manages what runs inside the VMs and the OPNsense router (through its API, `oxlorg.opnsense`). cloud-init in the Ubuntu template only bootstraps each VM (user, SSH key, network) so Ansible can reach it. Both tools are installed offline from the stick: OpenTofu and the provider as pinned release archives (filesystem mirror), Ansible from Debian packages served to apt as a local repository, collections as pinned Galaxy archives. The OpenTofu API token is kept after BANG, root-only, for later changes. The host reaches the lab VMs through the admin network (D8). |
+| D7 | **Provisioning and configuration tools** | **Both, run on the Proxmox host** (decided by the project owner). **OpenTofu** with `bpg/proxmox` creates and scales the lab's VMs and networks from `snap.yaml`, so changing the lab later means editing the file and re-applying. **Ansible** configures and manages what runs inside the VMs and the OPNsense router (through its API, `oxlorg.opnsense`). cloud-init in the lab machine template only bootstraps each VM (user, SSH key, network) so Ansible can reach it. Both tools are installed offline from the stick: OpenTofu and the provider as pinned release archives (filesystem mirror), Ansible from Debian packages served to apt as a local repository, collections as pinned Galaxy archives. The OpenTofu API token is kept after BANG, root-only, for later changes. The host reaches the lab VMs through the admin network (D8). |
 | D9 | **Plug-and-play** | **No config file needed** (decided by the project owner); the graphical setup wizard (section 5.3) is optional and starts filled in. The builder uses built-in defaults and generates the password; the stick asks on the target computer only which disk to install on, and only when there is more than one internal disk (section 5.2). Lab address ranges that clash with the networks the host is on are moved by POP (section 7.3). |
 | D8 | **How the host reaches the lab** | **A small admin network on `vmbr1`** (decided by the project owner). The Proxmox host gets an address on a dedicated admin VLAN of the internal bridge; OPNsense routes it to the lab networks and allows only SSH (Ansible) and its own API from it. Lab VMs cannot reach the host through it. Built in M3 (POP). |
 
@@ -301,7 +302,7 @@ The code lives in one Python package, `snaplab`, so the parts can import each ot
 
 - **M0:** repository, license, `snap.yaml` schema, test layers 1 and 2.
 - **M1:** the USB boot-chain spike (D1), then SNAP end to end: wizard, answer file, unattended install, handoff.
-- **M2:** the engine (`snap resume`, `snap status`, `snap logs`) and CRACKLE with the Ubuntu template.
+- **M2:** the engine (`snap resume`, `snap status`, `snap logs`) and CRACKLE with the lab machine template.
 - **M3:** the OPNsense template and importer spike (D2, passed), then POP with OPNsense, networks, test VMs, and policy tests.
 - **M4:** BANG, recovery screens, the Builder, and hardware testing.
 - **Later:** remote access, more delivery methods, Windows images, ZFS and mirrors.
