@@ -33,9 +33,17 @@ from pathlib import Path
 from snaplab.core import logo
 
 ASSETS = "live"  # snaplab/delivery/usb/live/
-# Proxmox packages left unconfigured on purpose: they install a boot loader on a disk;
-# the volatile lab boots from the stick's own GRUB.
-UNCONFIGURED_OK = {"proxmox-grub", "proxmox-secure-boot-support", "grub-pc", "grub-efi-amd64"}
+# Packages whose setup installs a boot loader on a disk, which fails in a folder and is not
+# wanted: the volatile lab boots from the stick's own GRUB. Their setup scripts are skipped,
+# so that dpkg records them as installed; otherwise apt sees a broken system and refuses to
+# install anything later (CRACKLE installs Ansible).
+BOOT_LOADER_PACKAGES = {
+    "proxmox-grub",
+    "proxmox-secure-boot-support",
+    "grub-pc",
+    "grub-efi-amd64",
+    "grub-efi-amd64-signed",
+}
 # Answers for the packages that ask questions while being configured.
 PRESEED = """\
 postfix postfix/main_mailer_type select Local only
@@ -186,11 +194,23 @@ def install_packages(root: Path, packages: list[Path], work: Path, log=print) ->
                 chroot.run("dpkg", "--force-confold", "--configure", "-a", log_file=log_file)
             except VolatileError:
                 pass  # judged below, package by package
-            left = unconfigured(chroot) - UNCONFIGURED_OK
+            skip = unconfigured(chroot) & BOOT_LOADER_PACKAGES
+            if skip:
+                for package in skip:
+                    script = root / f"var/lib/dpkg/info/{package}.postinst"
+                    if script.exists():
+                        script.write_text("#!/bin/sh\n# SNAP volatile lab: no boot loader to install here.\nexit 0\n")
+                chroot.run("dpkg", "--force-confold", "--configure", "-a", log_file=log_file)
+            left = unconfigured(chroot)
             if left:
                 raise VolatileError(
                     "these Proxmox packages could not be set up: " + ", ".join(sorted(left)) + f" (log: {log_file})"
                 )
+            # What CRACKLE's apt-get will find: a consistent system, every dependency met.
+            try:
+                chroot.run("apt-get", "check", log_file=log_file)
+            except VolatileError as e:
+                raise VolatileError(f"the volatile system's packages are inconsistent: {e}") from e
     finally:
         shutil.rmtree(debs, ignore_errors=True)
         (root / "tmp/snap-preseed").unlink(missing_ok=True)
