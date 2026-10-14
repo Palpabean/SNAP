@@ -192,3 +192,10 @@ def test_boot_scripts_are_valid_shell():
     for name in ("snaplive", "snap-splash"):
         result = subprocess.run(["sh", "-n", str(SCRIPT.parent / name)], capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
+
+
+def test_only_boot_loader_setup_is_ever_skipped():
+    for name in ("proxmox-grub", "proxmox-secure-boot-support", "grub-efi-amd64-signed", "grub2-common", "shim-signed"):
+        assert volatile.boot_loader(name)
+    for name in ("pve-manager", "proxmox-kernel-helper", "postfix", "qemu-server"):
+        assert not volatile.boot_loader(name)

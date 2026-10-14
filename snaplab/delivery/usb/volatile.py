@@ -34,16 +34,16 @@ from snaplab.core import logo
 
 ASSETS = "live"  # snaplab/delivery/usb/live/
 # Packages whose setup installs a boot loader on a disk, which fails in a folder and is not
-# wanted: the volatile lab boots from the stick's own GRUB. Their setup scripts are skipped,
-# so that dpkg records them as installed; otherwise apt sees a broken system and refuses to
-# install anything later (CRACKLE installs Ansible).
-BOOT_LOADER_PACKAGES = {
-    "proxmox-grub",
-    "proxmox-secure-boot-support",
-    "grub-pc",
-    "grub-efi-amd64",
-    "grub-efi-amd64-signed",
-}
+# wanted: the volatile lab boots from the stick's own GRUB. Their setup scripts are skipped
+# when they fail, so that dpkg records them as installed; otherwise apt sees a broken system
+# and refuses to install anything later (CRACKLE installs Ansible).
+BOOT_LOADER_PREFIXES = ("grub", "shim", "proxmox-grub", "proxmox-secure-boot")
+
+
+def boot_loader(package: str) -> bool:
+    return package.startswith(BOOT_LOADER_PREFIXES)
+
+
 # Answers for the packages that ask questions while being configured.
 PRESEED = """\
 postfix postfix/main_mailer_type select Local only
@@ -190,17 +190,22 @@ def install_packages(root: Path, packages: list[Path], work: Path, log=print) ->
                 "dpkg --force-depends --no-triggers --force-unsafe-io --force-confold --unpack /tmp/snap-debs/*.deb",
                 log_file=log_file,
             )  # fmt: skip
-            try:
-                chroot.run("dpkg", "--force-confold", "--configure", "-a", log_file=log_file)
-            except VolatileError:
-                pass  # judged below, package by package
-            skip = unconfigured(chroot) & BOOT_LOADER_PACKAGES
-            if skip:
-                for package in skip:
+            stubbed: set[str] = set()
+            for _ in range(4):
+                try:
+                    chroot.run("dpkg", "--force-confold", "--configure", "-a", log_file=log_file)
+                    break
+                except VolatileError:
+                    pass  # judged below, package by package
+                stuck = {p for p in unconfigured(chroot) if boot_loader(p)} - stubbed
+                if not stuck:
+                    break
+                for package in stuck:
                     script = root / f"var/lib/dpkg/info/{package}.postinst"
                     if script.exists():
                         script.write_text("#!/bin/sh\n# SNAP volatile lab: no boot loader to install here.\nexit 0\n")
-                chroot.run("dpkg", "--force-confold", "--configure", "-a", log_file=log_file)
+                stubbed |= stuck
+                log(f"skipping the boot-loader setup of {', '.join(sorted(stuck))}")
             left = unconfigured(chroot)
             if left:
                 raise VolatileError(
