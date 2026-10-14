@@ -86,6 +86,12 @@ def test_open_policy_and_rule_to_internet(cfg):
     assert services[-1]["destination_net"] == "any" and services[-1]["action"] == "pass"
 
 
+def test_volatile_lab_puts_machines_on_the_file_storage(cfg):
+    cfg["host"]["mode"] = "volatile"
+    v = lab.tofu_vars(cfg, "pve", {"opnsense": 9001, "lab": 9000}, False)
+    assert v["vm_storage"] == "local"
+
+
 def test_router_vars(cfg):
     v = lab.router_vars(cfg)
     assert v["dhcp_interfaces"] == ["opt2", "opt3"]

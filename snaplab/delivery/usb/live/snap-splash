@@ -1,0 +1,19 @@
+#!/bin/sh
+# SNAP volatile lab: the start-up screen on the computer's monitor, from power-on
+# until SNAP's own setup screen takes over. The logo and title are in
+# splash.txt (made when the stick is built); below them, the latest step from
+# /run/snap-volatile/status.
+SPLASH=/usr/local/lib/snap/splash.txt
+STATUS=/run/snap-volatile/status
+printf '\033[?25l'
+last=
+while :; do
+    now=$(cat "$STATUS" 2>/dev/null || echo "Starting Proxmox VE from the USB stick")
+    if [ "$now" != "$last" ]; then
+        printf '\033[2J\033[H'
+        cat "$SPLASH"
+        printf '\n      \033[1;36m>\033[0m %s\n' "$now"
+        last=$now
+    fi
+    sleep 1
+done

@@ -94,6 +94,7 @@ def summary(ctx: Context) -> dict[str, Any]:
         "user": "root",
         "name": f"{ctx.node}.{host_cfg['domain']}" if host_cfg.get("domain") else ctx.node,
         "router": lab.ROUTER_NAME,
+        "mode": host_cfg.get("mode", "permanent"),
         "networks": [
             {"name": n["name"], "cidr": n["cidr"], "policy": POLICIES.get(n.get("policy", ""), n.get("policy", ""))}
             for n in cfg["networks"]
@@ -118,6 +119,9 @@ def summary_text(s: dict[str, Any]) -> str:
         lines.append(f"{'Networks:' if i == 0 else '':<20}{n['name']:<10} {n['cidr']:<16} {n['policy']}")
     for i, m in enumerate(s["machines"]):
         lines.append(f"{'Machines:' if i == 0 else '':<20}{m['name']:<10} {m['ip']:<16} user {m['user']}")
+    if s.get("mode") == "volatile":
+        lines += ["", "This is a volatile lab: it runs from the USB stick and this computer's memory, and is",
+                  "gone, with everything in it, when the computer is turned off or the stick is removed."]  # fmt: skip
     lines += [
         "",
         "To change the lab later: edit the settings in /var/lib/snap/pop and apply them again",

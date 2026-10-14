@@ -59,9 +59,9 @@ def pve(tmp_path):
     return host
 
 
-def engine(host, messages=None):
+def engine(host, messages=None, cfg=None):
     say = messages.append if messages is not None else (lambda _: None)
-    return Engine([crackle.STAGE], Context(host=host, cfg={}, node="pve", say=say))
+    return Engine([crackle.STAGE], Context(host=host, cfg=cfg or {}, node="pve", say=say))
 
 
 def test_crackle_sets_up_a_fresh_host(pve):
@@ -86,6 +86,15 @@ def test_crackle_sets_up_a_fresh_host(pve):
     assert f"import-from={crackle.LAB_RAW}" in vm["scsi0"]
     assert not pve.exists(crackle.LAB_RAW)  # the unpacked copy is removed after the import
     assert vm["net0"] == "virtio,bridge=vmbr1"
+
+
+def test_volatile_lab_keeps_vm_disks_on_the_file_storage(pve):
+    """A volatile lab has no LVM storage: its disks go on the file storage, which is in memory."""
+    assert engine(pve, cfg={"host": {"mode": "volatile"}}).resume()
+    assert "images" in pve.local_content
+    vm = pve.vms[crackle.LAB_TEMPLATE_VMID]
+    assert vm["scsi0"].startswith("local:0,") and vm["ide2"] == "local:cloudinit"
+    assert crackle.vm_storage({}) == "local-lvm" and crackle.vm_storage({"host": {"mode": "permanent"}}) == "local-lvm"
 
 
 def test_second_run_changes_nothing(pve):

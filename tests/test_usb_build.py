@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from snaplab.delivery.usb import build, fetch, image, initrd, menu
+from snaplab.delivery.usb import build, fetch, image, initrd, menu, volatile
 
 ROOT = Path(__file__).parent.parent
 EXAMPLE = ROOT / "examples" / "snap.example.yaml"
@@ -355,6 +355,71 @@ def test_data_partition(built, tmp_path):
 
     assert cat("/snap.yaml") == EXAMPLE.read_bytes()
     assert b"bin/snap" in cat("/payload.sha256")
+
+
+@pytest.fixture(scope="module")
+def volatile_built(tmp_path_factory):
+    """The volatile stick, with a stand-in for the ready-made Proxmox system (built for real,
+    as root, in CI's USB e2e job)."""
+    stand_in = tmp_path_factory.mktemp("system")
+    system = volatile.System(stand_in / "pve-root.squashfs", stand_in / "vmlinuz", stand_in / "initrd.img")
+    system.squashfs.write_bytes(b"the whole Proxmox system" + os.urandom(100_000))
+    system.kernel.write_bytes(b"stand-in Proxmox kernel")
+    system.initrd.write_bytes(b"stand-in Proxmox initrd with snaplive")
+    mp = pytest.MonkeyPatch()
+    mp.setattr(volatile, "build_system", lambda iso, sha, cache, log=print: system)
+    try:
+        return (*build_stick(tmp_path_factory, None, release=True, volatile_lab=True), system)
+    finally:
+        mp.undo()
+
+
+def data_partition(img: Path, dest: Path) -> Path:
+    data = partitions(img)["SNAPDATA"]
+    with img.open("rb") as f:
+        f.seek(data["start"] * 512)
+        dest.write_bytes(f.read(data["size"] * 512))
+    return dest
+
+
+@needs_image_tools
+def test_volatile_stick_starts_the_ready_made_system(volatile_built):
+    img, iso, system = volatile_built
+    cfg = image.read_file(img, "/boot/grub/grub.cfg")
+    assert "Start the SNAP volatile lab (nothing is installed)" in cfg and "boot=snaplive" in cfg
+    assert "proxmox-start-auto-installer" not in cfg  # no installer on this stick
+    assert image.read_bytes(img, menu.VOLATILE_KERNEL) == system.kernel.read_bytes()
+    assert image.read_bytes(img, menu.VOLATILE_INITRD) == system.initrd.read_bytes()
+    assert "Volatile lab" in image.read_file(img, "/boot/grub/snap/theme.txt")
+    assert image.iso_uuid(img) == image.iso_uuid(iso)  # UEFI GRUB still finds it
+
+
+@needs_image_tools
+def test_volatile_stick_leaves_out_the_installer(volatile_built):
+    img, iso, _ = volatile_built
+    for path in build.INSTALLER_SQUASHFS:
+        with pytest.raises(image.ImageError):
+            image.extents(img, path)
+        for start, length in image.extents(iso, path):  # the old copies are zeroed
+            with img.open("rb") as f:
+                f.seek(start)
+                assert f.read(length) == bytes(length)
+
+
+@needs_image_tools
+def test_volatile_stick_carries_the_system_and_the_lab(volatile_built, tmp_path):
+    img, _, system = volatile_built
+    part = data_partition(img, tmp_path / "data.img")
+
+    def cat(path):
+        return subprocess.run(["debugfs", "-R", f"cat {path}", str(part)], check=True, capture_output=True).stdout
+
+    assert cat("/live/pve-root.squashfs") == system.squashfs.read_bytes()
+    assert b"live/" not in cat("/payload.sha256")  # not part of the payload firstboot.sh copies
+    assert json.loads(cat("/snap.json"))["host"]["mode"] == "volatile"
+    listing = subprocess.run(["debugfs", "-R", "ls -p /", str(part)], capture_output=True, text=True).stdout
+    assert build.PASSWORD_AT_INSTALL in listing
+    assert not build.password_file(img).exists()
 
 
 @needs_image_tools

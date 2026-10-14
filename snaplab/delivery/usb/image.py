@@ -116,14 +116,16 @@ def extents(iso: Path, path: str) -> list[tuple[int, int]]:
     return found
 
 
-def replace_boot_menu(prepared_iso: Path, files: dict[str, bytes | Path], out: Path) -> None:
+def replace_boot_menu(
+    prepared_iso: Path, files: dict[str, bytes | Path], out: Path, remove: list[str] | None = None
+) -> None:
     """Copy the ISO and replace or add `files` (ISO path to content or a local file), leaving
     its boot setup untouched.
 
     The change is appended as a new ISO session instead of rebuilding the image,
     so the boot code, partition tables and El Torito records stay byte for byte
     as Proxmox made them. The volume UUID, which Proxmox's EFI GRUB searches
-    for, is kept.
+    for, is kept. `remove`: files or folders the new session leaves out.
     """
     uuid = iso_uuid(prepared_iso)
     shutil.copyfile(prepared_iso, out)
@@ -136,7 +138,11 @@ def replace_boot_menu(prepared_iso: Path, files: dict[str, bytes | Path], out: P
                 local = Path(tmp) / str(i)
                 local.write_bytes(content)
             maps += ["-map", str(local), iso_path]
-        run(["xorriso", "-dev", str(out), "-boot_image", "any", "keep", "-volume_date", "uuid", uuid, *maps, "-commit"])
+        removals = [arg for path in remove or [] for arg in ("-rm_r", path, "--")]
+        run(
+            ["xorriso", "-dev", str(out), "-boot_image", "any", "keep", "-volume_date", "uuid", uuid,
+             *removals, *maps, "-commit"]
+        )  # fmt: skip
     if iso_uuid(out) != uuid:
         raise ImageError("the ISO lost its volume UUID; it would not boot on UEFI")
     with prepared_iso.open("rb") as a, out.open("rb") as b:
@@ -158,6 +164,23 @@ def blank_replaced(prepared_iso: Path, out: Path, paths: list[str]) -> None:
                 f.seek(start)
                 for done in range(0, length, 4 * MIB):
                     f.write(bytes(min(4 * MIB, length - done)))
+
+
+def blank_removed(original_iso: Path, out: Path, paths: list[str]) -> None:
+    """Zero the data of files and folders the appended session removed (replace_boot_menu's
+    `remove`): nothing refers to it any more, and zeros cost nothing once compressed."""
+    old = [extent for path in paths for extent in extents(original_iso, path)]
+    for path in paths:
+        try:
+            extents(out, path)
+        except ImageError:
+            continue
+        raise ImageError(f"{path} is still in the image; not blanking it")
+    with out.open("r+b") as f:
+        for start, length in old:
+            f.seek(start)
+            for done in range(0, length, 4 * MIB):
+                f.write(bytes(min(4 * MIB, length - done)))
 
 
 def make_data(payload: Path, out: Path) -> None:

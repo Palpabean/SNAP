@@ -27,7 +27,7 @@ include = ["snaplab*"]
 "snaplab.core.schema" = ["*.json"]
 "snaplab.stages.snap" = ["*.sh"]
 "snaplab.stages.pop" = ["tofu/*.tf", "ansible/*.yml", "ansible/*.py"]
-"snaplab.delivery.usb" = ["*.cfg", "*.sh", "Containerfile", "theme/*.txt", "theme/*.png", "wizard/*"]
+"snaplab.delivery.usb" = ["*.cfg", "*.sh", "Containerfile", "theme/*.txt", "theme/*.png", "wizard/*", "live/*"]
 
 [tool.ruff]
 line-length = 120

@@ -1,10 +1,13 @@
 # Build environment for the SNAP USB image (Design 0001, section 5.1).
 # Everything the builder needs, pinned to the versions in checksums.lock.
 # Runs unprivileged: the image is assembled in a file, with no loop devices.
+# The volatile stick (build --volatile) installs Proxmox into a folder first,
+# which needs root inside the container: add --privileged for that one.
 #
 #   podman build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
 #   podman run --rm -v "$PWD:/work" snaplab-builder build -o snap.img
 #   podman run --rm -v "$PWD:/work" snaplab-builder build my-changes.yaml -o snap.img
+#   podman run --rm --privileged -v "$PWD:/work" snaplab-builder build --volatile -o snap-volatile.img
 #
 # docker works the same way.
 FROM debian:trixie-slim
@@ -12,7 +15,7 @@ FROM debian:trixie-slim
 ARG ASSISTANT_VERSION=9.2.8
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl python3 python3-yaml python3-jsonschema \
-      xorriso e2fsprogs fdisk openssl zstd xz-utils qemu-utils squashfs-tools-ng \
+      xorriso e2fsprogs fdisk openssl zstd xz-utils qemu-utils squashfs-tools-ng squashfs-tools mount \
  && curl -fsSL https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg \
       -o /usr/share/keyrings/proxmox-archive-keyring.gpg \
  && printf '%s\n' 'Types: deb' 'URIs: http://download.proxmox.com/debian/pve' 'Suites: trixie' \

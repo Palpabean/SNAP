@@ -1,0 +1,14 @@
+[Unit]
+Description=SNAP volatile lab: hand over to SNAP's lab setup
+After=pve-cluster.service pveproxy.service pvedaemon.service snap-volatile-hosts.service
+Wants=pveproxy.service
+ConditionPathExists=!/var/lib/snap/progress/snap.done
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/snap-volatile handoff
+TimeoutStartSec=30min
+
+[Install]
+WantedBy=multi-user.target

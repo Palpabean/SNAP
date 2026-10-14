@@ -1,0 +1,13 @@
+[Unit]
+Description=SNAP volatile lab: this computer's address for Proxmox
+After=networking.service network-online.target snap-volatile-early.service
+Wants=network-online.target
+Before=pve-cluster.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/snap-volatile hosts
+
+[Install]
+WantedBy=multi-user.target

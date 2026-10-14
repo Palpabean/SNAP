@@ -58,7 +58,7 @@ def tofu_vars(
     cfg: dict[str, Any], node: str, template: dict[str, int], router_started: bool, extra_keys: list[str] = ()
 ) -> dict[str, Any]:
     """lab.auto.tfvars.json for snaplab/stages/pop/tofu/main.tf."""
-    from snaplab.stages.crackle.stage import LAB_BRIDGE, VM_STORAGE
+    from snaplab.stages.crackle.stage import LAB_BRIDGE, vm_storage
     from snaplab.stages.crackle.tools import API_SECRET
 
     spec = cfg["machines"]
@@ -66,7 +66,7 @@ def tofu_vars(
         "node": node,
         "api_token_file": API_SECRET,
         "lab_bridge": LAB_BRIDGE,
-        "vm_storage": VM_STORAGE,
+        "vm_storage": vm_storage(cfg),
         "router": {
             "vmid": ROUTER_VMID,
             "name": ROUTER_NAME,
