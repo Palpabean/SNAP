@@ -199,3 +199,17 @@ def test_only_boot_loader_setup_is_ever_skipped():
         assert volatile.boot_loader(name)
     for name in ("pve-manager", "proxmox-kernel-helper", "postfix", "qemu-server"):
         assert not volatile.boot_loader(name)
+
+
+def test_why_a_package_failed_comes_from_dpkg(tmp_path):
+    log = tmp_path / "packages.log"
+    log.write_text(
+        "Setting up pve-manager ...\n"
+        "dpkg: dependency problems prevent configuration of proxmox-grub:\n"
+        " proxmox-grub depends on grub-efi-amd64-signed; however:\n"
+        "  Package grub-efi-amd64-signed is not installed.\n"
+    )
+    why = volatile.mentions(log, ["proxmox-grub", "grub-efi-amd64-signed"])
+    assert "dependency problems prevent configuration of proxmox-grub" in why
+    assert "Package grub-efi-amd64-signed is not installed." in why
+    assert "pve-manager" not in why

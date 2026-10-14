@@ -130,6 +130,21 @@ def _run(cmd: list[str], log_file: Path | None = None, **kwargs) -> subprocess.C
         raise VolatileError(f"{' '.join(cmd[:3])} failed: {tail}") from e
 
 
+CHROOT_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "DEBIAN_FRONTEND": "noninteractive", "LC_ALL": "C"}
+
+
+def mentions(log_file: Path, packages: list[str], limit: int = 12) -> str:
+    """dpkg's last lines about `packages`, to say why they could not be set up."""
+    if not log_file.exists():
+        return "no log"
+    lines = [
+        line.strip()
+        for line in log_file.read_text(errors="replace").splitlines()
+        if any(p in line for p in packages) and ("depend" in line or "error" in line or "not" in line)
+    ]
+    return " / ".join(lines[-limit:]) or "no details in the log"
+
+
 class Chroot:
     """/proc, /sys and /dev mounted in `root` while in use, for package scripts."""
 
@@ -154,8 +169,7 @@ class Chroot:
         self.mounted.clear()
 
     def run(self, *cmd: str, log_file: Path | None = None) -> subprocess.CompletedProcess:
-        env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "DEBIAN_FRONTEND": "noninteractive", "LC_ALL": "C"}
-        return _run(["chroot", str(self.root), *cmd], log_file=log_file, env=env)
+        return _run(["chroot", str(self.root), *cmd], log_file=log_file, env=CHROOT_ENV)
 
 
 UNFINISHED = {"unpacked", "half-configured", "half-installed", "triggers-awaited", "triggers-pending"}
@@ -206,16 +220,27 @@ def install_packages(root: Path, packages: list[Path], work: Path, log=print) ->
                         script.write_text("#!/bin/sh\n# SNAP volatile lab: no boot loader to install here.\nexit 0\n")
                 stubbed |= stuck
                 log(f"skipping the boot-loader setup of {', '.join(sorted(stuck))}")
+            # Boot-loader packages that still cannot be set up (their dependencies are about
+            # installing a boot loader, not running Proxmox) are removed.
+            leftover = sorted(p for p in unconfigured(chroot) if boot_loader(p))
+            if leftover:
+                why = mentions(log_file, leftover)
+                log(f"leaving out {', '.join(leftover)}: {why}")
+                purge = ["dpkg", "--purge", "--force-depends", "--force-remove-reinstreq", *leftover]
+                chroot.run(*purge, log_file=log_file)
             left = unconfigured(chroot)
             if left:
                 raise VolatileError(
-                    "these Proxmox packages could not be set up: " + ", ".join(sorted(left)) + f" (log: {log_file})"
-                )
+                    "these Proxmox packages could not be set up: " + ", ".join(sorted(left)) + ": "
+                    + mentions(log_file, sorted(left))
+                )  # fmt: skip
             # What CRACKLE's apt-get will find: a consistent system, every dependency met.
-            try:
-                chroot.run("apt-get", "check", log_file=log_file)
-            except VolatileError as e:
-                raise VolatileError(f"the volatile system's packages are inconsistent: {e}") from e
+            check = subprocess.run(
+                ["chroot", str(root), "apt-get", "check"], capture_output=True, text=True, env=CHROOT_ENV
+            )
+            if check.returncode != 0:
+                detail = " / ".join((check.stdout + check.stderr).strip().splitlines()[-15:])
+                raise VolatileError(f"the volatile system's packages are inconsistent: {detail}")
     finally:
         shutil.rmtree(debs, ignore_errors=True)
         (root / "tmp/snap-preseed").unlink(missing_ok=True)
