@@ -48,6 +48,8 @@ jobs:
       - name: Boot it from a stand-in stick
         run: |
           sudo chown -R "$(id -u)" live
+          sudo chmod 666 /dev/kvm
+          ls -l /dev/kvm
           tests/usb/live-spike/boot.sh live
       - name: Keep the logs
         if: always()
