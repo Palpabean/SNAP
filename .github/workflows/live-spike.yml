@@ -47,7 +47,7 @@ jobs:
         run: sudo tests/usb/live-spike/root.sh iso live
       - name: Boot it from a stand-in stick
         run: |
-          sudo chown -R "$(id -u)" live/vmlinuz live/initrd.img live/pve-root.squashfs
+          sudo chown -R "$(id -u)" live
           tests/usb/live-spike/boot.sh live
       - name: Keep the logs
         if: always()
