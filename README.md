@@ -11,13 +11,30 @@ Boot the spare computer from the stick, confirm a few settings, and about an hou
 
 Everything the lab needs is on the stick, so the build works offline.
 
-> **The spare computer's disk is erased.** Use a machine with nothing on it you want to keep.
+## Permanent or volatile?
+
+SNAP comes as two sticks. Both build the same lab; they differ in where it lives.
+
+| | Permanent lab | Volatile lab |
+| :--- | :--- | :--- |
+| **Where it runs** | Installed on the computer's disk | From the USB stick and the computer's memory |
+| **The computer's disk** | **Erased** | Untouched |
+| **After turning it off** | The lab is still there | The lab is gone; the next start builds a fresh one |
+| **The USB stick** | Can be removed once it is set up | Must stay in while the lab runs |
+| **Memory (RAM)** | 16 GB recommended, 8 GB minimum | 16 GB |
+| **Setup screens** | Yes: change the name, networks, machines and firewall | No: the built-in lab, with no questions |
+| **Download** | `snap.img.xz` | `snap-volatile.img.xz` |
+
+Pick **permanent** for a lab you keep and come back to. Pick **volatile** to try SNAP, for a class or a
+demo, or on a computer you cannot erase.
+
+> **A permanent lab erases the spare computer's disk.** Use a machine with nothing on it you want to keep.
 
 ## Requirements
 
 | | |
 | :--- | :--- |
-| **Spare computer** | 64-bit, virtualization (Intel VT-x / AMD-V) enabled, 16 GB RAM (8 GB minimum), 128 GB+ disk, wired network connection |
+| **Spare computer** | 64-bit, virtualization (Intel VT-x / AMD-V) enabled, 16 GB RAM (8 GB minimum for a permanent lab), wired network connection; a permanent lab also needs a 128 GB+ disk |
 | **USB stick** | 8 GB or larger (it is erased) |
 | **Your own computer** | Windows, macOS or Linux, with about 4 GB free and [balenaEtcher](https://etcher.balena.io/) |
 
@@ -25,12 +42,14 @@ Everything the lab needs is on the stick, so the build works offline.
 
 ### 1. Make the stick
 
-1. Download **`snap.img.xz`** (about 2 GB) from the [latest release](https://github.com/Palpabean/SNAP/releases/latest).
-2. Open balenaEtcher, choose **Flash from file**, select `snap.img.xz` (no need to unzip it), pick the USB stick, and click **Flash**.
+1. From the [latest release](https://github.com/Palpabean/SNAP/releases/latest), download **`snap.img.xz`**
+   (permanent, about 2 GB) or **`snap-volatile.img.xz`** (volatile, about 1.6 GB).
+2. Open balenaEtcher, choose **Flash from file**, select the file (no need to unzip it), pick the USB stick,
+   and click **Flash**.
 
 The stick contains no password. Each lab computer generates its own and shows it on screen.
 
-### 2. Install the lab
+### 2. Install the lab (permanent stick)
 
 1. Plug the stick and a network cable into the spare computer and power it on.
 2. Open the boot menu (usually **F12**, **F11**, **F8** or **Esc**) and choose the USB stick.
@@ -48,6 +67,11 @@ The stick contains no password. Each lab computer generates its own and shows it
 Prefer no questions at all? Choose **Install with SNAP's settings, no questions asked** in the
 menu. SNAP shows the disk it will use and erases it after 15 seconds (with more than one disk it
 asks which one, and you type `ERASE` to confirm).
+
+**Volatile stick:** steps 1 and 2 are the same; then the SNAP menu starts the volatile lab after
+10 seconds. There are no setup screens and nothing is installed: the SNAP start-up screen appears,
+and about 30 to 40 minutes later the screen says **Your lab is ready**. Keep the stick in the whole
+time, and remember that turning the computer off deletes the lab.
 
 [Pictures of every screen, in order](docs/screens/README.md)
 
@@ -101,6 +125,8 @@ asked" install. Write `snap.img` to a stick with balenaEtcher.
   computer generates its own at first boot. A `v*` tag (pushed, or created with **Draft a new
   release** on GitHub) builds it, compresses it to `snap.img.xz` and attaches it to the release
   (`.github/workflows/release.yml`).
+- **Volatile stick:** `build --volatile -o snap-volatile.img` builds a ready-made Proxmox system from the
+  ISO's own packages and puts it on the stick; it needs root, so run the container with `--privileged`.
 - **Unattended:** `--unattended text` makes "no questions asked" the menu default;
   `--unattended wizard` runs the setup screens with their defaults (used by the automated tests).
 - **Serial console:** `--serial-console` for headless machines.
