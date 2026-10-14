@@ -16,13 +16,16 @@ permissions:
 jobs:
   spike:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - name: Tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends squashfs-tools xorriso cpio zstd file
+          sudo apt-get install -y -q --no-install-recommends squashfs-tools xorriso cpio zstd file qemu-system-x86
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
       - uses: actions/cache/restore@v4
         with:
           path: .snaplab-cache
@@ -40,5 +43,17 @@ jobs:
           xorriso -osirrox on -indev "$iso" -extract / iso >/dev/null 2>&1
           chmod -R u+w iso
           ls -la iso iso/boot
-      - name: Facts
-        run: tests/usb/live-spike/facts.sh iso
+      - name: Build the ready-made Proxmox system
+        run: sudo tests/usb/live-spike/root.sh iso live
+      - name: Boot it from a stand-in stick
+        run: |
+          sudo chown -R "$(id -u)" live/vmlinuz live/initrd.img live/pve-root.squashfs
+          tests/usb/live-spike/boot.sh live
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-spike-logs
+          path: |
+            live/*.log
+          if-no-files-found: ignore
