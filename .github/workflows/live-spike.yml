@@ -1,0 +1,44 @@
+name: Volatile lab spike
+
+# Temporary: checks whether Proxmox's own system image (pve-base.squashfs on the
+# ISO) can run straight from the stick with a RAM layer on top. Removed before merge.
+on:
+  push:
+    branches: ["claude/**"]
+    paths:
+      - ".github/workflows/live-spike.yml"
+      - "tests/usb/live-spike/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends squashfs-tools xorriso cpio zstd file
+      - uses: actions/cache/restore@v4
+        with:
+          path: .snaplab-cache
+          key: snaplab-cache-${{ hashFiles('checksums.lock') }}
+      - name: The Proxmox ISO
+        run: |
+          ls -la .snaplab-cache || true
+          iso=.snaplab-cache/proxmox-ve_9.2-1.iso
+          if [ ! -f "$iso" ]; then
+            mkdir -p .snaplab-cache
+            curl -fsSL -o "$iso" https://enterprise.proxmox.com/iso/proxmox-ve_9.2-1.iso
+          fi
+          echo "4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c  $iso" | sha256sum -c
+          mkdir -p iso
+          xorriso -osirrox on -indev "$iso" -extract / iso >/dev/null 2>&1
+          chmod -R u+w iso
+          ls -la iso iso/boot
+      - name: Facts
+        run: tests/usb/live-spike/facts.sh iso
