@@ -600,7 +600,7 @@ def test_volatile_stick_shows_its_menu_and_starts(volatile_built, tmp_path, uefi
     img, _, _ = volatile_built
     folder = Path(os.environ.get("SNAPLAB_SCREENSHOTS") or tmp_path)
     picture = folder / f"volatile-boot-menu-{'uefi' if uefi else 'bios'}.png"
-    out = boot(img, tmp_path, uefi, until="SNAP: starting the volatile lab", shot=("Advanced options", picture))
+    out = boot(img, tmp_path, uefi, until="Leave the stick in", shot=("Advanced options", picture))
     assert picture.stat().st_size > 5000
     assert "Start the SNAP volatile lab (nothing is installed)" in out
     assert "Install SNAP" not in out  # no installer on this stick
