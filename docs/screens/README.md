@@ -98,6 +98,32 @@ step that stopped.
 
 ![Needs attention](15-lab-needs-attention.png)
 
+## The volatile lab's stick
+
+The volatile stick (`snap-volatile.img.xz`) has no setup screens and installs nothing.
+
+### 1. The SNAP menu
+
+It starts the volatile lab after 10 seconds.
+
+![The volatile boot menu](16-volatile-boot-menu.png)
+
+### 2. Starting up
+
+While Proxmox starts from the stick, the SNAP start-up screen says what a volatile lab is and
+what it is doing.
+
+![The start-up screen](17-volatile-start-up.png)
+
+### 3. Setting up, then ready
+
+Then the same screen as above builds the lab. The ready screen reminds you that turning the
+computer off, or removing the stick, deletes the lab.
+
+![Setting up a volatile lab](18-volatile-setting-up.png)
+
+![A volatile lab is ready](19-volatile-ready.png)
+
 ---
 
 <details>

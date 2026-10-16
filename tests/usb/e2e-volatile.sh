@@ -80,7 +80,8 @@ for ppm in "$WORK"/screens/*.ppm; do
     [ -s "$ppm" ] && pnmtopng "$ppm" > "${ppm%.ppm}.png" 2>/dev/null && rm -f "$ppm"
 done
 echo "result: $result after $(( $(date +%s) - start ))s"
-tr -d '\r' < "$WORK/volatile.log" | grep -a -E "SNAP|snap-volatile" | tail -n 80 || true
+# Every step with its time since power-on, to see where the time goes.
+tr -d '\r' < "$WORK/volatile.log" | grep -a -E "snap\[[0-9]+\]: SNAP: |snap-volatile\[|Out of memory|oom-kill|Killed process" || true
 
 echo "== the computer's own disk"
 size=$(stat -c %s "$WORK/disk.img")

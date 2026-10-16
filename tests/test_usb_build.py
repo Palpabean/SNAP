@@ -593,6 +593,20 @@ def test_fresh_machine_shows_snap_menu_and_installs(built, tmp_path, uefi):
     assert "SNAP: starting the guided setup." in out  # the default entry
 
 
+@needs_image_tools
+@needs_qemu
+@pytest.mark.parametrize("uefi", [False, True], ids=["bios", "uefi"])
+def test_volatile_stick_shows_its_menu_and_starts(volatile_built, tmp_path, uefi):
+    img, _, _ = volatile_built
+    folder = Path(os.environ.get("SNAPLAB_SCREENSHOTS") or tmp_path)
+    picture = folder / f"volatile-boot-menu-{'uefi' if uefi else 'bios'}.png"
+    out = boot(img, tmp_path, uefi, until="SNAP: starting the volatile lab", shot=("Advanced options", picture))
+    assert picture.stat().st_size > 5000
+    assert "Start the SNAP volatile lab (nothing is installed)" in out
+    assert "Install SNAP" not in out  # no installer on this stick
+    assert "SNAP: starting the volatile lab from the USB stick." in out  # the default entry
+
+
 needs_lvm = pytest.mark.skipif(
     os.environ.get("SNAPLAB_TEST_LVM") != "1",
     reason="set SNAPLAB_TEST_LVM=1 on a machine with sudo, loop devices and LVM (CI's usb-image job does)",

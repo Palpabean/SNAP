@@ -40,6 +40,7 @@ FROM_TESTS = {
     "6-installing.png": "10-installing.png",
     "8-done.png": "11-installed.png",
     "7-failed.png": "12-install-failed.png",
+    "volatile-boot-menu-uefi.png": "16-volatile-boot-menu.png",
 }
 TESTS = [["tests/test_usb_build.py", "-k", "fresh"], ["tests/test_wizard_ui.py"]]
 
@@ -48,6 +49,7 @@ BACKGROUND = (6, 9, 13)
 TEXT = (208, 215, 222)
 COLOURS = {"32": (63, 185, 80), "36": (45, 212, 191), "31": (255, 107, 107), "2": (138, 155, 173), "1": (255, 255, 255)}
 COLOURS["34"] = (59, 130, 246)
+COLOURS["1;34"], COLOURS["1;36"] = COLOURS["34"], COLOURS["36"]  # the volatile start-up screen
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
 COLS, ROWS = 100, 44
 
@@ -64,7 +66,7 @@ def from_tests() -> None:
                 print(f"not made (tools missing?): {target}")
 
 
-def host_screens() -> dict[str, list[str]]:
+def host_screens(mode: str = "permanent") -> dict[str, list[str]]:
     """`snap screen`'s output for each situation, on a stand-in lab computer."""
     import json
 
@@ -86,6 +88,11 @@ def host_screens() -> dict[str, list[str]]:
         "14-lab-ready.png": (["snap", "crackle", "pop", "bang"], {}),
         "15-lab-needs-attention.png": (["snap", "crackle"], {"pop": ("failed", pop_steps, "router")}),
     }
+    if mode == "volatile":
+        situations = {
+            "18-volatile-setting-up.png": situations["13-lab-setting-up.png"],
+            "19-volatile-ready.png": situations["14-lab-ready.png"],
+        }
     out = {}
     for picture, (finished, running) in situations.items():
         with tempfile.TemporaryDirectory() as root:
@@ -103,6 +110,7 @@ def host_screens() -> dict[str, list[str]]:
             host.write(STATE_FILE, json.dumps(state))
             host.write(bang.PASSWORD_FILE, "ab3k-9xqe-7tmd-p2wr\n")
             cfg = json.loads(json.dumps(defaults.DEFAULTS))
+            cfg["host"]["mode"] = mode
             engine = Engine(hostcli.STAGES, Context(host=host, cfg=cfg, node="snap"))
             out[picture] = screen.render(screen.snapshot(engine), COLS, ROWS)
     return out
@@ -127,11 +135,20 @@ def draw(lines: list[str], path: Path) -> None:
     image.save(path)
 
 
+def start_up_screen() -> list[str]:
+    """The volatile lab's start-up screen (snaplab/delivery/usb/live/snap-splash), mid-way."""
+    from snaplab.delivery.usb import volatile
+
+    status = "Waiting for a network address from your router"
+    return volatile.splash(COLS).splitlines() + ["", f"      \033[1;36m>\033[0m {status}"]
+
+
 def main() -> None:
     if "--host" not in sys.argv:
         from_tests()
-    for picture, lines in host_screens().items():
+    for picture, lines in {**host_screens(), **host_screens("volatile")}.items():
         draw(lines, HERE / picture)
+    draw(start_up_screen(), HERE / "17-volatile-start-up.png")
     print(f"pictures in {HERE}")
 
 
