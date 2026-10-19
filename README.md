@@ -70,7 +70,7 @@ asks which one, and you type `ERASE` to confirm).
 
 **Volatile stick:** steps 1 and 2 are the same; then the SNAP menu starts the volatile lab after
 10 seconds. There are no setup screens and nothing is installed: the SNAP start-up screen appears,
-and about 30 to 40 minutes later the screen says **Your lab is ready**. Keep the stick in the whole
+and about 10 to 20 minutes later the screen says **Your lab is ready**. Keep the stick in the whole
 time, and remember that turning the computer off deletes the lab.
 
 [Pictures of every screen, in order](docs/screens/README.md)
