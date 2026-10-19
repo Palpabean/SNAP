@@ -74,3 +74,50 @@ jobs:
             e2e-work/*.log
             e2e-work/screens/*.png
           if-no-files-found: ignore
+
+  # The volatile stick (build --volatile): runs the lab from the stick and memory, from the
+  # boot menu to "Your lab is ready", and must leave the computer's own disk untouched.
+  e2e-volatile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    env:
+      WORK: ${{ github.workspace }}/e2e-work
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - name: Install QEMU
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 ovmf netpbm
+      - uses: actions/cache@v4
+        with:
+          path: .snaplab-cache
+          key: snaplab-cache-${{ hashFiles('checksums.lock') }}
+      - name: Build the builder container
+        run: docker build -t snaplab-builder -f snaplab/delivery/usb/Containerfile .
+      - name: Build the volatile USB image
+        run: |
+          # --privileged: the builder installs Proxmox into a folder (chroot, /proc).
+          docker run --rm --privileged -v "$PWD:/work" snaplab-builder build tests/usb/e2e.yaml \
+            -o snap-volatile.img --volatile --release --serial-console
+          sudo chown -R "$(id -u)" .snaplab-cache snap-volatile.img*
+          test ! -e snap-volatile.img.password.txt
+          ls -l snap-volatile.img
+      - name: Run it
+        run: |
+          sudo chmod 666 /dev/kvm
+          tests/usb/e2e-volatile.sh snap-volatile.img uefi
+      - name: Keep the serial log and screens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serial-logs-volatile
+          path: |
+            e2e-work/*.log
+            e2e-work/screens/*.png
+          if-no-files-found: ignore

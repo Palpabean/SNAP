@@ -27,7 +27,7 @@ import yaml
 
 import snaplab
 from snaplab.core import config, defaults
-from snaplab.delivery.usb import debs, fetch, image, initrd, menu, wizard_files
+from snaplab.delivery.usb import debs, fetch, image, initrd, menu, volatile, wizard_files
 from snaplab.stages.snap import answer
 
 ASSISTANT = "proxmox-auto-install-assistant"
@@ -64,8 +64,16 @@ def _asset(package: str, name: str) -> bytes:
     return resources.files(package).joinpath(name).read_bytes()
 
 
-def check_tools() -> None:
-    missing = [t for t in TOOLS if shutil.which(t) is None]
+# The volatile stick has no installer, so no answer file; it builds Proxmox itself instead.
+VOLATILE_TOOLS = [t for t in TOOLS if t not in (ASSISTANT, "sqfs2tar", "tar2sqfs")] + [
+    "unsquashfs",
+    "mksquashfs",
+    "chroot",
+]
+
+
+def check_tools(tools: list[str] = TOOLS) -> None:
+    missing = [t for t in tools if shutil.which(t) is None]
     if missing:
         raise BuildError(
             "missing tools: " + ", ".join(missing) + ". Run the builder in the container from "
@@ -307,10 +315,12 @@ def build(
     serial_console: bool = False,
     unattended: str | None = None,
     release: bool = False,
+    volatile_lab: bool = False,
     log=print,
 ) -> Path:
     """Build the stick. `release`: an image to publish for download, the same file for everyone,
-    so it holds no password; each lab computer picks its own at first start."""
+    so it holds no password; each lab computer picks its own at first start. `volatile_lab`:
+    a stick that runs the lab from itself and the computer's memory, installing nothing."""
     if release:
         cfg, password_at_install = defaults.lock_passwords(config.load(config_path))
         password = None
@@ -320,6 +330,11 @@ def build(
     lock = fetch.load_lock(lock_path)
     cache = cache or default_cache()
     cache.mkdir(parents=True, exist_ok=True)
+    if volatile_lab:
+        cfg["host"]["mode"] = "volatile"
+        check_tools(VOLATILE_TOOLS)
+        output = build_volatile(config_path, cfg, password_at_install, output, cache, lock, serial_console, log)
+        return finish(output, cfg, password, log)
     check_tools()
 
     pinned = lock["proxmox-auto-install-assistant"]["version"]
@@ -329,7 +344,6 @@ def build(
 
     pve = lock["proxmox-ve"]
     iso = fetch.fetch(pve["url"], pve["sha256"], cache, log=log)
-    files, tools = bundle_lab_files(lock, cache, log)
     firstboot = _asset("snaplab.stages.snap", "firstboot.sh")
 
     output = output.resolve()
@@ -340,13 +354,7 @@ def build(
         image.run([ASSISTANT, "validate-answer", str(work / "answer.toml")])
         prepared = prepare(iso, answer_toml, firstboot, installed, cache, log=log)
 
-        repo = work / "debs"
-        tools["debian_packages"] = bundle_debs(lock["ansible"], repo, log)
-        files.update({f"debs/{f.name}": f for f in repo.iterdir()})
-        if password_at_install:  # read by firstboot.sh
-            flag = work / PASSWORD_AT_INSTALL
-            flag.write_text("This stick holds no password; the lab computer picks its own at first start.\n")
-            files[PASSWORD_AT_INSTALL] = flag
+        files, tools = payload_files(lock, cache, work, password_at_install, log)
         make_payload(config_path, cfg, files, work / "payload", tools)
         image.make_data(work / "payload", work / "data.img")
 
@@ -369,7 +377,69 @@ def build(
         image.blank_replaced(prepared, stick, list(repacked))
         image.assemble(stick, work / "data.img", stick)
         stick.replace(output)
+    return finish(output, cfg, password, log)
 
+
+def payload_files(lock: dict, cache: Path, work: Path, password_at_install: bool, log=print) -> tuple[dict, dict]:
+    """What goes on the stick for the lab, whichever kind of stick: images, tools, Ansible."""
+    files, tools = bundle_lab_files(lock, cache, log)
+    repo = work / "debs"
+    tools["debian_packages"] = bundle_debs(lock["ansible"], repo, log)
+    files.update({f"debs/{f.name}": f for f in repo.iterdir()})
+    if password_at_install:  # read by firstboot.sh
+        flag = work / PASSWORD_AT_INSTALL
+        flag.write_text("This stick holds no password; the lab computer picks its own at first start.\n")
+        files[PASSWORD_AT_INSTALL] = flag
+    return files, tools
+
+
+# What a volatile stick leaves out of the Proxmox ISO: the installer, its base system and
+# Proxmox's packages, all already inside the ready-made system. Their space is zeroed.
+VOLATILE_REMOVE = ["/pve-installer.squashfs", "/pve-base.squashfs", "/proxmox"]
+
+
+def build_volatile(config_path, cfg, password_at_install, output, cache, lock, serial_console, log=print) -> Path:
+    """The volatile stick: Proxmox's ISO for its boot setup only, with the SNAP volatile menu,
+    the ready-made Proxmox system's kernel and initrd, and in SNAPDATA the lab's payload plus
+    live/pve-root.squashfs, the system itself."""
+    pve = lock["proxmox-ve"]
+    iso = fetch.fetch(pve["url"], pve["sha256"], cache, log=log)
+    try:
+        system = volatile.build_system(iso, pve["sha256"], cache, log=log)
+    except volatile.VolatileError as e:
+        raise BuildError(str(e)) from e
+    output = output.resolve()
+    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".snaplab-") as tmp:
+        work = Path(tmp)
+        files, tools = payload_files(lock, cache, work, password_at_install, log)
+        make_payload(config_path, cfg, files, work / "payload", tools)
+        # Not part of the payload (firstboot.sh leaves live/ on the stick): the system itself.
+        live = work / "payload/live/pve-root.squashfs"
+        live.parent.mkdir()
+        shutil.copyfile(system.squashfs, live)
+        image.make_data(work / "payload", work / "data.img")
+
+        log("assembling the volatile USB image")
+        stick = work / "snap.img"
+        present = [p for p in VOLATILE_REMOVE if _in_iso(iso, p)]
+        boot = {**menu.volatile_files(serial_console), menu.VOLATILE_KERNEL: system.kernel,
+                menu.VOLATILE_INITRD: system.initrd}  # fmt: skip
+        image.replace_boot_menu(iso, boot, stick, remove=present)
+        image.blank_removed(iso, stick, present)
+        image.assemble(stick, work / "data.img", stick)
+        stick.replace(output)
+    return output
+
+
+def _in_iso(iso: Path, path: str) -> bool:
+    try:
+        image.extents(iso, path)
+        return True
+    except image.ImageError:
+        return False
+
+
+def finish(output: Path, cfg: dict, password: str | None, log=print) -> Path:
     digest = fetch.sha256(output)
     output.with_name(output.name + ".sha256").write_text(f"{digest}  {output.name}\n")
     log(f"wrote {output} ({output.stat().st_size // image.MIB} MiB, sha256 {digest})")

@@ -1,0 +1,15 @@
+[Unit]
+Description=SNAP volatile lab: start-up screen
+DefaultDependencies=no
+After=systemd-vconsole-setup.service
+Before=sysinit.target
+Conflicts=snap-screen.service getty@tty1.service
+
+[Service]
+ExecStart=/usr/local/sbin/snap-splash
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+
+[Install]
+WantedBy=sysinit.target

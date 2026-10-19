@@ -35,8 +35,9 @@ def computer(tmp_path):
     return LabComputer(tmp_path)
 
 
-def engine_for(host):
+def engine_for(host, mode="permanent"):
     cfg = json.loads(json.dumps(defaults.DEFAULTS))
+    cfg["host"]["mode"] = mode
     return Engine(hostcli.STAGES, Context(host=host, cfg=cfg, node="snap", say=lambda _: None))
 
 
@@ -54,8 +55,9 @@ def record(host, stage, status, steps, error=None):
     host.write(STATE_FILE, json.dumps(state))
 
 
-def text(host, **kw):
-    return "\n".join(ANSI.sub("", line) for line in screen.render(screen.snapshot(engine_for(host)), **kw))
+def text(host, mode="permanent", **kw):
+    snap = screen.snapshot(engine_for(host, mode))
+    return "\n".join(ANSI.sub("", line) for line in screen.render(snap, **kw))
 
 
 def test_setting_up_shows_each_stage_and_the_current_step(computer):
@@ -86,6 +88,21 @@ def test_lab_ready_shows_how_to_log_in_and_what_was_built(computer):
     assert "services   10.10.20.0/24    isolated" in out
     assert "alpine-01  10.10.10.100     user labuser" in out and "alpine-02" in out
     assert "choose Advanced, then Continue" in out
+
+
+def test_volatile_lab_says_it_is_gone_when_turned_off(computer):
+    finished(computer, "snap")
+    working = text(computer, mode="volatile")
+    assert "[x] SNAP     Start Proxmox from the USB stick" in working
+    assert "Keep this computer on and the USB stick in" in working
+    finished(computer, "crackle", "pop", "bang")
+    ready = text(computer, mode="volatile")
+    assert "Your lab is ready." in ready and "You can remove the USB stick" not in ready
+    assert "Volatile lab: everything is lost when you turn off this computer or remove the stick." in ready
+    s = screen.Screen(engine_for(computer, "volatile"), out=io.StringIO(), keys_fd=os.pipe()[0], run=lambda _: None)
+    s.size = lambda: (100, 30)
+    s.key("o")
+    assert "This deletes the lab. Turn off now? Press Y for yes" in ANSI.sub("", s.frame()[-1])
 
 
 def test_ready_screen_shows_addresses_pop_moved(computer):

@@ -70,7 +70,9 @@ say "copying the lab payload from the USB stick"
 staging="$STATE_DIR.partial"
 rm -rf "$staging"
 mkdir -p "$staging"
-cp -R "$src/." "$staging/" || fail "copying from the USB stick failed"
+# live/ is the volatile lab's Proxmox system (snaplab build --volatile), which runs
+# from the stick itself and is not part of the payload.
+tar -C "$src" --exclude=./live -cf - . | tar -C "$staging" -xf - || fail "copying from the USB stick failed"
 (cd "$staging" && sha256sum --quiet --strict -c payload.sha256) ||
     fail "the copied files do not match their checksums; the USB stick may be damaged"
 chmod -R go-rwx "$staging"
@@ -156,4 +158,8 @@ if [ -z "$ROOT" ]; then
     # --no-block: this script itself runs inside a first-boot unit.
     systemctl enable --now --no-block snap-resume.service snap-screen.service
 fi
-say "Handoff complete: you can remove the USB now."
+if [ -n "${SNAP_VOLATILE:-}" ]; then
+    say "Handoff complete. This lab runs from the USB stick: leave it in."
+else
+    say "Handoff complete: you can remove the USB now."
+fi

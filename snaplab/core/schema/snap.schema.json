@@ -100,6 +100,11 @@
           "type": "string",
           "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
         },
+        "mode": {
+          "description": "permanent: Proxmox and the lab are installed on the computer's disk, which is erased. volatile: they run from the USB stick and the computer's memory and are gone when it is turned off; set by `snaplab build --volatile`, not by hand.",
+          "enum": ["permanent", "volatile"],
+          "default": "permanent"
+        },
         "storage": {
           "description": "Single-disk layouts only in the proof of concept.",
           "type": "object",

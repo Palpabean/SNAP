@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""SNAP volatile lab: what Proxmox's installer would have set up, done at every start.
+
+The volatile lab runs the ready-made Proxmox system from the USB stick with a
+RAM layer on top (the snaplive boot script), so each start begins from the
+same generic system. This sets it up for this computer and this lab:
+
+  snap-volatile early    before the network: name, time zone, password, SSH keys,
+                         and the network settings (/etc/network/interfaces)
+  snap-volatile hosts    once the network is up, before Proxmox's cluster service:
+                         this computer's name and address in /etc/hosts, which
+                         Proxmox needs
+  snap-volatile handoff  once Proxmox runs: hand over to SNAP's setup (the same
+                         firstboot.sh an installed lab runs), from the stick
+
+The lab's settings come from snap.json on the stick, as on an installed lab.
+What it is doing goes to /run/snap-volatile/status for the start-up screen.
+"""
+
+from __future__ import annotations
+
+import ipaddress
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+STICK = Path(os.environ.get("SNAP_STICK", "/run/snaplive/stick"))
+ROOT = Path(os.environ.get("SNAP_ROOT", "/"))
+STATUS = ROOT / "run/snap-volatile/status"
+FIRSTBOOT = "/usr/local/lib/snap/firstboot.sh"
+BRIDGE = "vmbr0"
+# When no router hands out an address within this time, the lab still starts, on this one.
+FALLBACK_ADDRESS = "192.168.100.10/24"
+
+
+def status(text: str) -> None:
+    print(f"snap-volatile: {text}", flush=True)
+    STATUS.parent.mkdir(parents=True, exist_ok=True)
+    STATUS.write_text(text + "\n")
+
+
+def settings() -> dict:
+    return json.loads((STICK / "snap.json").read_text())
+
+
+def path(p: str) -> Path:
+    return ROOT / p.lstrip("/")
+
+
+def run(*cmd: str, check: bool = True) -> subprocess.CompletedProcess:
+    if os.environ.get("SNAP_DRY_RUN"):
+        print("would run:", " ".join(cmd), flush=True)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    return subprocess.run(cmd, check=check, capture_output=True, text=True)
+
+
+# --- network ports -----------------------------------------------------------------
+
+
+def ports(sys_net: Path = Path("/sys/class/net")) -> list[str]:
+    """Wired network ports of this computer, in name order (bridges, bonds and Wi-Fi left out)."""
+    found = []
+    for dev in sorted(sys_net.iterdir()) if sys_net.is_dir() else []:
+        if not (dev / "device").exists() or (dev / "wireless").exists() or (dev / "bridge").exists():
+            continue
+        if (dev / "type").exists() and (dev / "type").read_text().strip() != "1":
+            continue
+        found.append(dev.name)
+    return found
+
+
+def carrier(name: str, sys_net: Path = Path("/sys/class/net")) -> bool:
+    try:
+        return (sys_net / name / "carrier").read_text().strip() == "1"
+    except OSError:
+        return False
+
+
+def mac(name: str, sys_net: Path = Path("/sys/class/net")) -> str:
+    try:
+        return (sys_net / name / "address").read_text().strip().lower()
+    except OSError:
+        return ""
+
+
+def pick_port(mgmt: dict, sys_net: Path = Path("/sys/class/net"), wait: float = 8) -> str:
+    """The port for the lab's main bridge: the one with the given MAC address, else the first
+    with a cable plugged in, else the first."""
+    candidates = ports(sys_net)
+    if not candidates:
+        raise SystemExit("snap-volatile: this computer has no wired network port")
+    if mgmt.get("mac"):
+        for name in candidates:
+            if mac(name, sys_net) == mgmt["mac"].lower():
+                return name
+    for name in candidates:
+        run("ip", "link", "set", name, "up", check=False)
+    deadline = time.monotonic() + wait
+    while True:
+        for name in candidates:
+            if carrier(name, sys_net):
+                return name
+        if time.monotonic() >= deadline:
+            return candidates[0]
+        time.sleep(0.5)
+
+
+def interfaces(port: str, mgmt: dict) -> str:
+    """/etc/network/interfaces as Proxmox's installer writes it: the port in the vmbr0 bridge."""
+    lines = ["auto lo", "iface lo inet loopback", "", f"iface {port} inet manual", "", f"auto {BRIDGE}"]
+    if mgmt.get("mode") == "static":
+        lines += [
+            f"iface {BRIDGE} inet static",
+            f"\taddress {mgmt['address']}",
+            f"\tgateway {mgmt['gateway']}",
+        ]
+    else:
+        lines += [f"iface {BRIDGE} inet dhcp"]
+    lines += [f"\tbridge-ports {port}", "\tbridge-stp off", "\tbridge-fd 0", ""]
+    return "\n".join(lines)
+
+
+# --- the three steps ---------------------------------------------------------------
+
+
+def early() -> None:
+    cfg = settings()
+    host, mgmt = cfg["host"], cfg["host"].get("management", {"mode": "dhcp"})
+    status("Setting up this computer")
+    name, domain = host["hostname"], host["domain"]
+    path("/etc/hostname").write_text(name + "\n")
+    path("/etc/hosts").write_text(f"127.0.0.1 localhost\n127.0.1.1 {name}.{domain} {name}\n")
+    run("hostname", name, check=False)
+    zone = host.get("timezone", "UTC")
+    if (path("/usr/share/zoneinfo") / zone).exists():
+        localtime = path("/etc/localtime")
+        localtime.unlink(missing_ok=True)
+        localtime.symlink_to(f"/usr/share/zoneinfo/{zone}")
+        path("/etc/timezone").write_text(zone + "\n")
+    if host.get("root_password_hash"):
+        run("usermod", "-p", host["root_password_hash"], "root")
+    run("ssh-keygen", "-A")
+    if mgmt.get("mode") == "static" and mgmt.get("dns"):
+        path("/etc/resolv.conf").write_text("".join(f"nameserver {d}\n" for d in mgmt["dns"]))
+    port = pick_port(mgmt)
+    path("/etc/network/interfaces").write_text(interfaces(port, mgmt))
+    status(f"Connecting to the network through {port}")
+
+
+def address(timeout: float = 120) -> str | None:
+    """This computer's IPv4 address on the main bridge, waiting for DHCP."""
+    deadline = time.monotonic() + timeout
+    while True:
+        out = run("ip", "-j", "-4", "addr", "show", BRIDGE, check=False).stdout or "[]"
+        for link in json.loads(out):
+            for a in link.get("addr_info", []):
+                if a.get("family") == "inet":
+                    return a["local"]
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(2)
+
+
+def hosts() -> None:
+    host = settings()["host"]
+    name, domain = host["hostname"], host["domain"]
+    status("Waiting for a network address from your router")
+    ip = address()
+    if ip is None:
+        # No DHCP: start anyway, so the lab still works from this computer's own screen.
+        status(f"No address from the network; using {FALLBACK_ADDRESS}")
+        run("ip", "addr", "add", FALLBACK_ADDRESS, "dev", BRIDGE, check=False)
+        ip = str(ipaddress.ip_interface(FALLBACK_ADDRESS).ip)
+    path("/etc/hosts").write_text(f"127.0.0.1 localhost\n{ip} {name}.{domain} {name}\n")
+    status(f"Starting Proxmox VE at https://{ip}:8006")
+
+
+def handoff() -> None:
+    status("Copying the lab's files from the USB stick")
+    env = {**os.environ, "SNAP_SOURCE": str(STICK), "SNAP_VOLATILE": "1"}
+    done = subprocess.run(["bash", FIRSTBOOT], env=env)
+    if done.returncode != 0:
+        status("Setup could not start; see /var/log/snap/firstboot.log")
+        sys.exit(done.returncode)
+    status("Building your lab")
+
+
+def main(argv: list[str]) -> None:
+    steps = {"early": early, "hosts": hosts, "handoff": handoff}
+    if len(argv) != 2 or argv[1] not in steps:
+        raise SystemExit("usage: snap-volatile early|hosts|handoff")
+    steps[argv[1]]()
+
+
+if __name__ == "__main__":
+    main(sys.argv)

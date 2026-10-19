@@ -26,8 +26,8 @@ def stick(tmp_path):
     return make_stick(tmp_path / "usb", {"snap.yaml": "version: 1\n", "bin/snap": "#!/bin/sh\n"})
 
 
-def run(root: Path, source: Path):
-    env = {**os.environ, "SNAP_ROOT": str(root), "SNAP_SOURCE": str(source)}
+def run(root: Path, source: Path, **extra):
+    env = {**os.environ, "SNAP_ROOT": str(root), "SNAP_SOURCE": str(source), **extra}
     return subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
 
 
@@ -46,6 +46,18 @@ def test_handoff(tmp_path, stick):
     assert os.readlink(root / "usr/local/bin/snap") == "/var/lib/snap/bin/snap"
     assert "you can remove the USB now" in result.stdout
     assert "you can remove the USB now" in (root / "var/log/snap/firstboot.log").read_text()
+
+
+def test_volatile_lab_leaves_its_proxmox_system_on_the_stick(tmp_path, stick):
+    """A volatile stick also carries live/pve-root.squashfs, which is not part of the payload."""
+    (stick / "live").mkdir()
+    (stick / "live/pve-root.squashfs").write_text("the whole Proxmox system")
+    root = tmp_path / "root"
+    result = run(root, stick, SNAP_VOLATILE="1")
+    assert result.returncode == 0, result.stdout
+    assert (root / "var/lib/snap/bin/snap").exists()
+    assert not (root / "var/lib/snap/live").exists()
+    assert "This lab runs from the USB stick: leave it in." in result.stdout
 
 
 def test_second_run_does_nothing(tmp_path, stick):

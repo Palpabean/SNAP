@@ -1,0 +1,15 @@
+[Unit]
+Description=SNAP volatile lab: set up this computer (name, password, network)
+DefaultDependencies=no
+After=local-fs.target systemd-udev-settle.service systemd-udev-trigger.service
+Wants=systemd-udev-settle.service
+Before=networking.service network-pre.target ssh.service pve-cluster.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/snap-volatile early
+
+[Install]
+WantedBy=sysinit.target

@@ -44,6 +44,9 @@ POLICIES = {
     "open": "internet and other lab networks",
 }
 MINUTES_LEFT = {"snap": 40, "crackle": 35, "pop": 25, "bang": 5}
+# A volatile lab (snaplab build --volatile) installs nothing: SNAP starts Proxmox from the stick.
+VOLATILE_SNAP = "Start Proxmox from the USB stick"
+VOLATILE_NOTE = "Volatile lab: everything is lost when you turn off this computer or remove the stick."
 
 
 # --- what the screen shows ------------------------------------------------------
@@ -70,8 +73,11 @@ def snapshot(engine: Engine) -> dict[str, Any]:
     """Everything the screen needs, read fresh from the machine."""
     host = engine.host
     state = engine.load()
+    volatile = engine.ctx.cfg.get("host", {}).get("mode") == "volatile"
     stages = []
     for name, label, what in STAGES:
+        if volatile and name == "snap":
+            what = VOLATILE_SNAP
         record = state["stages"].get(name, {})
         if host.exists(f"{PROGRESS_DIR}/{name}.done"):
             status = "done"
@@ -115,6 +121,7 @@ def snapshot(engine: Engine) -> dict[str, Any]:
         "networks": networks,
         "machines": machines,
         "minutes": sum(MINUTES_LEFT.get(s["name"], 0) for s in stages if s["status"] in ("waiting", "running")),
+        "volatile": volatile,
     }
 
 
@@ -154,7 +161,8 @@ def render(snap: dict[str, Any], width: int = 80, height: int = 25, colour: bool
 
     if snap["phase"] == "working":
         left = f"about {snap['minutes']} minutes left" if snap["minutes"] else "almost done"
-        lines += ["", f"Setting up your lab. Keep this computer on ({left}).", ""]
+        keep = "Keep this computer on and the USB stick in" if snap.get("volatile") else "Keep this computer on"
+        lines += ["", f"Setting up your lab. {keep} ({left}).", ""]
         checklist()
         cur = snap["current"]
         if cur:
@@ -175,7 +183,10 @@ def render(snap: dict[str, Any], width: int = 80, height: int = 25, colour: bool
             lines.append(f"  Password: {password}")
 
     elif snap["phase"] == "ready":
-        lines += ["", f"{c('Your lab is ready.', 'ok')}  You can remove the USB stick.", ""]
+        if snap.get("volatile"):
+            lines += ["", c("Your lab is ready.", "ok"), c(VOLATILE_NOTE, "bad"), ""]
+        else:
+            lines += ["", f"{c('Your lab is ready.', 'ok')}  You can remove the USB stick.", ""]
         lines.append(f"  Open in your browser:   {c(snap['web'] or 'https://<this computer>:8006', 'ok')}")
         lines.append("  User name:              root")
         lines.append(f"  Password:               {password}")
@@ -245,7 +256,8 @@ class Screen:
         snap = snapshot(self.engine)
         lines = render(snap, cols, rows - 2, show_password=self.show_password)
         if self.confirm_off:
-            lines += ["", paint("  Turn the computer off now? Press Y for yes, any other key for no.", "bad", True)]
+            ask = "This deletes the lab. Turn off now?" if snap.get("volatile") else "Turn the computer off now?"
+            lines += ["", paint(f"  {ask} Press Y for yes, any other key for no.", "bad", True)]
         return lines
 
     def key(self, k: str) -> bool:

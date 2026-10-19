@@ -17,7 +17,7 @@ import time
 
 from snaplab.core.engine import Context, Stage, Step
 from snaplab.stages.crackle import tools as crackle_tools
-from snaplab.stages.crackle.stage import LAB_TEMPLATE_VMID, VM_STORAGE
+from snaplab.stages.crackle.stage import LAB_TEMPLATE_VMID, vm_storage
 from snaplab.stages.pop import addresses, lab, network, opnsense
 
 OPNSENSE_VMID = 9001
@@ -90,7 +90,7 @@ def make_template(ctx: Context) -> None:
             "--tags", "snap",
             "--ostype", "other", "--cpu", "host", "--cores", "2", "--memory", "1024",
             "--scsihw", "virtio-scsi-single",
-            "--scsi0", f"{VM_STORAGE}:0,import-from={raw},discard=on",
+            "--scsi0", f"{vm_storage(ctx.cfg)}:0,import-from={raw},discard=on",
             "--boot", "order=scsi0",
             "--net0", "virtio,bridge=vmbr0",
             "--serial0", "socket",

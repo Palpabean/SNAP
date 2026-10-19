@@ -1,0 +1,44 @@
+# SNAP volatile lab: initramfs-tools boot script, chosen with boot=snaplive.
+#
+# Runs the ready-made Proxmox system straight from the USB stick: the stick's
+# SNAPDATA partition holds it as live/pve-root.squashfs, mounted read-only,
+# with a RAM layer on top (overlayfs on tmpfs). Everything the lab writes goes
+# to that RAM layer; nothing is ever written to the computer's own disks or to
+# the stick, and turning the computer off forgets it all.
+#
+# The stick's partition and the two layers stay mounted under /run/snaplive in
+# the running system (stick: the lab's files; rw: the RAM layer).
+
+SNAPLIVE_LABEL=SNAPDATA
+SNAPLIVE_IMAGE=live/pve-root.squashfs
+# Share of the computer's memory the RAM layer may use (the lab's VM disks live there).
+SNAPLIVE_RAM=75%
+
+snaplive_fail() {
+    echo "SNAP: $1" >&2
+    echo "SNAP: the volatile lab cannot start. Check that the SNAP USB stick is plugged in, then restart." >&2
+    panic "$1"
+}
+
+mountroot() {
+    for m in squashfs overlay loop; do modprobe -q "$m" || true; done
+
+    dev=/dev/disk/by-label/$SNAPLIVE_LABEL
+    i=0
+    while [ ! -e "$dev" ] && [ $i -lt 60 ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    [ -e "$dev" ] || snaplive_fail "the USB stick ($SNAPLIVE_LABEL) was not found"
+
+    mkdir -p /run/snaplive/stick /run/snaplive/lower /run/snaplive/rw
+    mount -t ext4 -o ro "$dev" /run/snaplive/stick || snaplive_fail "could not read the USB stick"
+    [ -f "/run/snaplive/stick/$SNAPLIVE_IMAGE" ] || snaplive_fail "this USB stick has no volatile lab on it"
+    mount -t squashfs -o ro,loop "/run/snaplive/stick/$SNAPLIVE_IMAGE" /run/snaplive/lower ||
+        snaplive_fail "could not open the Proxmox system on the USB stick"
+    mount -t tmpfs -o "mode=0755,size=$SNAPLIVE_RAM" snaplive-ram /run/snaplive/rw
+    mkdir -p /run/snaplive/rw/upper /run/snaplive/rw/work
+    mount -t overlay -o lowerdir=/run/snaplive/lower,upperdir=/run/snaplive/rw/upper,workdir=/run/snaplive/rw/work \
+        snaplive "${rootmnt:?}" || snaplive_fail "could not start the RAM layer"
+    # initramfs-tools moves /run, with these mounts, into the running system.
+}

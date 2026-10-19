@@ -21,6 +21,22 @@ FILE_STORAGE = "local"
 # and disk image imports, on top of Proxmox's defaults.
 FILE_CONTENT = {"iso", "vztmpl", "backup", "snippets", "import"}
 
+
+def volatile(cfg: dict) -> bool:
+    """A volatile lab runs from the USB stick and memory (snaplab build --volatile)."""
+    return cfg.get("host", {}).get("mode") == "volatile"
+
+
+def vm_storage(cfg: dict) -> str:
+    """Where VM disks go: Proxmox's LVM storage on an installed computer; on a volatile lab,
+    which has no disk of its own, the file storage, which then lives in memory."""
+    return FILE_STORAGE if volatile(cfg) else VM_STORAGE
+
+
+def file_content(cfg: dict) -> set[str]:
+    return FILE_CONTENT | {"images"} if volatile(cfg) else FILE_CONTENT
+
+
 LAB_TEMPLATE_VMID = 9000
 LAB_TEMPLATE_NAME = "snap-alpine-322"
 LAB_IMAGE = "images/alpine-3.22-cloudinit.raw.xz"  # repacked by the builder
@@ -151,11 +167,11 @@ def _file_content(ctx: Context) -> set[str]:
 
 
 def storage_done(ctx: Context) -> bool:
-    return FILE_CONTENT <= _file_content(ctx)
+    return file_content(ctx.cfg) <= _file_content(ctx)
 
 
 def set_storage(ctx: Context) -> None:
-    content = sorted(_file_content(ctx) | FILE_CONTENT)
+    content = sorted(_file_content(ctx) | file_content(ctx.cfg))
     ctx.host.run("pvesm", "set", FILE_STORAGE, "--content", ",".join(content))
 
 
@@ -189,7 +205,7 @@ def make_template(ctx: Context) -> None:
 
 
 def _create_template(ctx: Context, vmid: str) -> None:
-    image = LAB_RAW
+    image, storage = LAB_RAW, vm_storage(ctx.cfg)
     ctx.host.run(
         "qm", "create", vmid,
         "--name", LAB_TEMPLATE_NAME,
@@ -197,8 +213,8 @@ def _create_template(ctx: Context, vmid: str) -> None:
         "--tags", "snap",
         "--ostype", "l26", "--cpu", "host", "--cores", "2", "--memory", "2048",
         "--scsihw", "virtio-scsi-single",
-        "--scsi0", f"{VM_STORAGE}:0,import-from={image},discard=on,ssd=1",
-        "--ide2", f"{VM_STORAGE}:cloudinit",
+        "--scsi0", f"{storage}:0,import-from={image},discard=on,ssd=1",
+        "--ide2", f"{storage}:cloudinit",
         "--boot", "order=scsi0",
         "--net0", f"virtio,bridge={LAB_BRIDGE}",
         "--serial0", "socket", "--vga", "serial0",

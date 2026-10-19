@@ -27,6 +27,7 @@ DEFAULTS: dict[str, Any] = {
         "management": {"mode": "dhcp"},
         "email": "admin@lab.internal",
         "storage": {"filesystem": "ext4"},
+        "mode": "permanent",
     },
     "networks": [
         {

@@ -94,6 +94,41 @@ def logo_labels() -> str:
     return "\n".join(labels)
 
 
+VOLATILE_NOTE = (
+    '+ label {\n    left = 50%-320\n    top = 252\n    width = 640\n    height = 20\n    align = "center"\n'
+    '    text = "Volatile lab: runs from this USB stick. Nothing on this computer is changed."\n'
+    '    font = "Unifont Regular 16"\n    color = "#8A9BAD"\n}'
+)
+# The volatile stick's kernel and initrd, from its ready-made Proxmox system (volatile.py).
+VOLATILE_KERNEL = "/boot/snap/vmlinuz"
+VOLATILE_INITRD = "/boot/snap/initrd.img"
+
+
+def theme_files(extra: str = "") -> dict[str, bytes]:
+    """The SNAP theme, logo included, by path on the ISO; `extra`: more theme items."""
+    out = {}
+    for item in resources.files("snaplab.delivery.usb").joinpath("theme").iterdir():
+        data = item.read_bytes()
+        if item.name == "theme.txt":
+            data = data.decode().replace("@LOGO@", logo_labels() + ("\n" + extra if extra else "")).encode()
+        out[f"/boot/grub/snap/{item.name}"] = data
+    return out
+
+
+# With a serial console, the volatile lab's system log goes there too (it has no disk to keep it on).
+VOLATILE_SERIAL = SERIAL_CONSOLE + " systemd.journald.forward_to_console=1"
+
+
+def render_volatile(serial_console: bool = False) -> str:
+    template = resources.files("snaplab.delivery.usb").joinpath("grub-volatile.cfg").read_text()
+    return template.replace("@KERNEL_EXTRA@", VOLATILE_SERIAL if serial_console else "")
+
+
+def volatile_files(serial_console: bool = False) -> dict[str, bytes]:
+    """The volatile stick's menu and theme, by path on the ISO (kernel and initrd added by the builder)."""
+    return {"/boot/grub/grub.cfg": render_volatile(serial_console).encode(), **theme_files(VOLATILE_NOTE)}
+
+
 def files(
     pve_cfg: str,
     pve_initrd: bytes,
@@ -102,13 +137,8 @@ def files(
     wizard_files: dict[str, bytes] | None = None,
 ) -> dict[str, bytes]:
     """Everything the SNAP menu adds to the ISO, by path on the ISO."""
-    out = {
+    return {
         "/boot/grub/grub.cfg": render(pve_cfg, serial_console, unattended).encode(),
         DISK_PROMPT: initrd.overlay(pve_initrd, wizard_files or {}),
+        **theme_files(),
     }
-    for item in resources.files("snaplab.delivery.usb").joinpath("theme").iterdir():
-        data = item.read_bytes()
-        if item.name == "theme.txt":
-            data = data.decode().replace("@LOGO@", logo_labels()).encode()
-        out[f"/boot/grub/snap/{item.name}"] = data
-    return out

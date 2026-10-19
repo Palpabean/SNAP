@@ -37,6 +37,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="an image to publish for download: no password in it; each lab computer picks its own",
     )
+    usb.add_argument(
+        "--volatile",
+        action="store_true",
+        help="a volatile-lab stick: the lab runs from the stick and the computer's memory, nothing is installed "
+        "and it is gone when the computer is turned off (needs root: run the container with --privileged)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -61,13 +67,18 @@ def main(argv: list[str] | None = None) -> int:
                 serial_console=args.serial_console,
                 unattended=args.unattended,
                 release=args.release,
+                volatile_lab=args.volatile,
             )
         except (build.BuildError, fetch.FetchError, image.ImageError) as e:
             print(f"build failed: {e}", file=sys.stderr)
             return 1
-        print(f"Write it to a USB stick of 4 GB or more, for example: sudo dd if={out.name} of=/dev/sdX bs=4M")
-        print("Then boot the target computer from the stick. It asks only which disk to install on, and only")
-        print("if the computer has more than one; everything else runs by itself.")
+        print(f"Write it to a USB stick of 8 GB or more, for example: sudo dd if={out.name} of=/dev/sdX bs=4M")
+        if args.volatile:
+            print("Then boot the target computer from the stick. The lab runs from the stick and the computer's")
+            print("memory; nothing on the computer is changed, and the lab is gone when it is turned off.")
+        else:
+            print("Then boot the target computer from the stick. It asks only which disk to install on, and only")
+            print("if the computer has more than one; everything else runs by itself.")
     elif args.command == "answer":
         from snaplab.core import defaults
 
